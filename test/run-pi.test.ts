@@ -43,6 +43,21 @@ describe("buildPiArgs", () => {
 		expect(args).toContain("--no-session");
 	});
 
+	it("does not inherit the caller's skills, templates, or context files", () => {
+		// The whole point of this tool is an INDEPENDENT opinion from another model
+		// family. pi loads ~/.claude/skills by default — the SAME skills the calling
+		// Claude has — which makes the delegate's answer the caller's own priors
+		// laundered through a different model.
+		//
+		// This is not hypothetical: Gemini once answered a "read these three files
+		// and audit them" prompt from an al-sem-detector skill it found in
+		// ~/.claude/skills, never opening the code.
+		const args = buildPiArgs("gpt-5.5", "hi");
+		expect(args).toContain("--no-skills");
+		expect(args).toContain("--no-prompt-templates");
+		expect(args).toContain("--no-context-files");
+	});
+
 	it("passes the model through and puts the prompt last", () => {
 		const args = buildPiArgs("gemini-3.1-pro-preview", "what is 2+2");
 		expect(args[args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-preview");

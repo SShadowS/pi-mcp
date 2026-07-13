@@ -65,6 +65,24 @@ export function buildPiArgs(model: string, prompt: string): string[] {
 	return [
 		"-p",
 		"--no-session",
+		// CONTAMINATION GUARDS. pi loads skills, prompt templates, and CLAUDE.md/
+		// AGENTS.md from the user's global config by default — including
+		// ~/.claude/skills, the SAME skills the calling Claude has.
+		//
+		// That defeats the entire purpose of this tool. The point is an INDEPENDENT,
+		// UNCORRELATED opinion from another model family. A delegate primed with the
+		// caller's own skills is not independent; it is the caller's priors laundered
+		// through a different model.
+		//
+		// Caught in the wild: asked to audit al-perf's detectors by reading three
+		// specific source files, Gemini instead answered from an `al-sem-detector`
+		// skill it found in ~/.claude/skills — 161 words of hedged speculation
+		// ("assuming it lacks a multi-file resolved model") without ever opening the
+		// code. GPT-5.5, given the identical prompt, read the files and wrote 2295
+		// words of specifics.
+		"--no-skills",
+		"--no-prompt-templates",
+		"--no-context-files",
 		"--provider",
 		PROVIDER,
 		"--model",
