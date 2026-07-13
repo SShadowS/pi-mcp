@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { resolve } from "path";
 import { runPi } from "../src/run-pi.js";
 
 /**
@@ -22,11 +23,20 @@ const TIMEOUT = 180_000;
 
 describe("the leash (integration — hits the real API)", () => {
 	it(
-		"pi CAN read files",
+		"pi CAN read files — by ABSOLUTE path",
 		async () => {
+			// Absolute, deliberately. pi runs from pi-workspace/ (that is where its
+			// .mcp.json lives, and the cwd IS the MCP config), so a relative path
+			// resolves against the workspace and finds nothing. This is the tool's
+			// documented contract — callers pass absolute paths — and this test is
+			// the thing that would catch it silently regressing.
+			const repoPkg = resolve(import.meta.dir, "..", "package.json").replace(
+				/\\/g,
+				"/",
+			);
 			const res = await runPi(
 				MODEL,
-				"Read package.json and reply with ONLY the value of the name field. Nothing else.",
+				`Read the file ${repoPkg} and reply with ONLY the value of its "name" field. Nothing else.`,
 			);
 			expect(res.ok).toBe(true);
 			if (res.ok) expect(res.text).toContain("pi-mcp");
