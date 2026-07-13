@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { formatAskResult, cleanupLivePi } from "../src/pi-server.js";
+import { formatAskResult, cleanupLivePi, EVIDENCE_CONTRACT, evidenceVerdict, extractEvidence } from "../src/pi-server.js";
 import { livePiPids } from "../src/run-pi.js";
 
 describe("formatAskResult carries the continuation_id", () => {
@@ -83,5 +83,65 @@ describe("pi_cleanup — safe reaping, scoped to PIDs WE spawned", () => {
 
 	it("is a no-op when nothing is tracked", async () => {
 		expect(await cleanupLivePi()).toBe(0);
+	});
+});
+
+describe("require_evidence — the fix for silent prior-answering (BACKLOG 0c)", () => {
+	const answer = [
+		"The detector works by scanning IR nodes.",
+		"",
+		"```json evidence",
+		JSON.stringify({
+			files_checked: ["U:/Git/al-perf/src/core/patterns.ts"],
+			searches_performed: ["al-perf ir-json"],
+			confidence: "high",
+		}),
+		"```",
+	].join("\n");
+
+	it("extracts the evidence block and strips it from the body", () => {
+		const { evidence, body } = extractEvidence(answer);
+		expect(evidence?.files_checked).toEqual(["U:/Git/al-perf/src/core/patterns.ts"]);
+		expect(evidence?.confidence).toBe("high");
+		expect(body).toContain("scanning IR nodes");
+		expect(body).not.toContain("json evidence");
+	});
+
+	it("returns null evidence when the model ignored the contract", () => {
+		const { evidence, body } = extractEvidence("Just prose, no block.");
+		expect(evidence).toBeNull();
+		expect(body).toBe("Just prose, no block.");
+	});
+
+	it("flags an answer with zero files and zero searches as prior-derived", () => {
+		// This is Gemini's failure mode made visible in the data: confident
+		// conclusions, nothing examined.
+		const verdict = evidenceVerdict({
+			files_checked: [],
+			searches_performed: [],
+			confidence: "high",
+		});
+		expect(verdict).toContain("⚠");
+		expect(verdict.toLowerCase()).toContain("prior");
+	});
+
+	it("flags a missing evidence block even harder", () => {
+		expect(evidenceVerdict(null)).toContain("⚠");
+	});
+
+	it("passes a well-evidenced answer quietly", () => {
+		const verdict = evidenceVerdict({
+			files_checked: ["U:/Git/al-perf/src/core/patterns.ts"],
+			searches_performed: [],
+			confidence: "high",
+		});
+		expect(verdict).not.toContain("⚠");
+		expect(verdict).toContain("1 file");
+	});
+
+	it("the contract demands the exact fields extractEvidence parses", () => {
+		for (const field of ["files_checked", "searches_performed", "confidence"]) {
+			expect(EVIDENCE_CONTRACT).toContain(field);
+		}
 	});
 });

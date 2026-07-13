@@ -47,6 +47,68 @@ export function formatAskResult(res: PiResult, outputFile?: string, continuation
 	return `Wrote ${words} words to ${abs}\n\nPreview:\n${preview}${ellipsis}${footer}`;
 }
 
+/**
+ * PAL's trick (BACKLOG 0c): a model cannot quietly answer from priors if it
+ * must declare, in a required structure, what it examined. Gemini's 443-word
+ * prior-answer would have arrived with files_checked: [] — the lie visible in
+ * the data instead of hidden in plausible prose.
+ */
+export const EVIDENCE_CONTRACT = `
+
+---
+MANDATORY: End your answer with a fenced code block tagged \`json evidence\` containing exactly:
+{
+  "files_checked": [/* FULL absolute paths of every file you actually read */],
+  "searches_performed": [/* every web search / fetch you actually made */],
+  "confidence": "exploring" | "low" | "medium" | "high" | "almost_certain" | "certain"
+}
+Only list files you truly opened with your read tool. An empty list is an acceptable answer; a fabricated one is not.`;
+
+export type Evidence = {
+	files_checked: string[];
+	searches_performed: string[];
+	confidence: "exploring" | "low" | "medium" | "high" | "almost_certain" | "certain";
+};
+
+const EVIDENCE_RE = /```json evidence\s*\n([\s\S]*?)\n```\s*$/;
+
+export function extractEvidence(text: string): {
+	evidence: Evidence | null;
+	body: string;
+} {
+	const m = text.match(EVIDENCE_RE);
+	if (!m) return { evidence: null, body: text };
+	try {
+		const parsed = JSON.parse(m[1]);
+		if (!Array.isArray(parsed.files_checked)) return { evidence: null, body: text };
+		return {
+			evidence: {
+				files_checked: parsed.files_checked,
+				searches_performed: Array.isArray(parsed.searches_performed)
+					? parsed.searches_performed
+					: [],
+				confidence: parsed.confidence ?? "exploring",
+			},
+			body: text.slice(0, m.index).trimEnd(),
+		};
+	} catch {
+		return { evidence: null, body: text };
+	}
+}
+
+/** One line, loud when it matters, quiet when it doesn't. */
+export function evidenceVerdict(e: Evidence | null): string {
+	if (!e)
+		return "⚠ NO EVIDENCE BLOCK: the delegate ignored the evidence contract. Treat the answer as unverified.";
+	if (e.files_checked.length === 0 && e.searches_performed.length === 0)
+		return `⚠ PRIOR-DERIVED ANSWER: 0 files read, 0 searches — the delegate examined nothing, yet reports confidence '${e.confidence}'. Its conclusions come from training priors, not your code.`;
+	const files = `${e.files_checked.length} file(s) read`;
+	const searches = e.searches_performed.length
+		? `, ${e.searches_performed.length} search(es)`
+		: "";
+	return `Evidence: ${files}${searches}, confidence ${e.confidence}.\n${e.files_checked.map((f) => `  - ${f}`).join("\n")}`;
+}
+
 export function createPiMcpServer(): McpServer {
 	const server = new McpServer({ name: "pi", version: "0.1.0" });
 
@@ -85,21 +147,33 @@ export function createPiMcpServer(): McpServer {
 					.describe(
 						"Continue a previous pi_ask thread. Pass the [continuation_id: ...] value from an earlier answer; the delegate sees its prior turns and files. Omit to start fresh.",
 					),
+				require_evidence: z
+					.boolean()
+					.optional()
+					.describe(
+						"Default true. Appends a contract forcing the delegate to declare which files it read and searches it made; the answer is prefixed with a verdict. An answer with 0 files and 0 searches is flagged as prior-derived — the silent failure mode this exists to catch. Set false only for questions where reading nothing is expected.",
+					),
 			},
 		},
-		async ({ model, prompt, output_file, thinking, continuation_id }) => {
-			// Every call gets a session id — new threads mint one — so EVERY answer
-			// is continuable. The cost is a small session file in .sessions/, which
-			// is why SESSIONS_DIR is ours to sweep.
+		async ({ model, prompt, output_file, thinking, continuation_id, require_evidence }) => {
 			const sessionId = continuation_id ?? crypto.randomUUID();
-			const res = await runPi(model, prompt, thinking, undefined, sessionId);
+			const wantEvidence = require_evidence !== false;
+			const fullPrompt = wantEvidence ? prompt + EVIDENCE_CONTRACT : prompt;
+			const res = await runPi(model, fullPrompt, thinking, undefined, sessionId);
+
+			if (!res.ok || !wantEvidence) {
+				return {
+					content: [
+						{ type: "text" as const, text: formatAskResult(res, output_file, sessionId) },
+					],
+				};
+			}
+
+			const { evidence, body } = extractEvidence(res.text);
+			const verdict = evidenceVerdict(evidence);
+			const formatted = formatAskResult({ ok: true, text: body }, output_file, sessionId);
 			return {
-				content: [
-					{
-						type: "text" as const,
-						text: formatAskResult(res, output_file, sessionId),
-					},
-				],
+				content: [{ type: "text" as const, text: `${verdict}\n\n${formatted}` }],
 			};
 		},
 	);
