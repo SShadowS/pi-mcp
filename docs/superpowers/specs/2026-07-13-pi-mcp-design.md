@@ -99,9 +99,37 @@ reading the flag.
 **pi has no built-in web access at all.** No fetch, no search. Its only route out
 is the `mcp` tool, which is why `mcp` is in the allowlist.
 
-Two MCP servers get wired into **pi's own** config (`~/.pi/agent/settings.json`) —
-deliberately **not** into any project's `.mcp.json`, which Claude Code also reads
-and which must not be polluted with servers meant for pi:
+> ### CORRECTION (found during implementation)
+>
+> This section originally said the two servers below get wired into **pi's own
+> config** (`~/.pi/agent/settings.json`), and that this keeps them out of any
+> project's `.mcp.json`.
+>
+> **That is impossible. pi does not read its settings file for MCP servers.**
+>
+> pi discovers MCP servers from exactly one place: **the `.mcp.json` in its working
+> directory.** Not `~/.pi/agent/settings.json`, not `~/.mcp.json`. Established
+> empirically — pi run in al-perf (which has a `.mcp.json`) reports al-profiler's
+> 14 tools through its `mcp` gateway; run anywhere else it reports
+> `MCP: 0/0 servers`. Writing an `mcpServers` key into pi's settings had no effect
+> whatsoever, and produced no error.
+>
+> **The fix:** a dedicated `pi-workspace/` directory whose sole job is to hold that
+> `.mcp.json`. `runPi` always spawns pi there. The alternative — putting
+> `fetch`/`search` into each target repo's `.mcp.json` — is still rejected, for the
+> original reason: Claude Code reads those too.
+>
+> **The cost:** pi's `read` is rooted in the workspace, so callers must pass
+> **absolute paths**. pi handles them fine (verified: from the workspace it read
+> `U:/Git/al-perf/package.json`). `pi_ask`'s `cwd` parameter was therefore
+> **removed** — setting it is exactly how you would lose the web tools without
+> being told, since pi reports no error when it has no servers, it simply has none.
+>
+> The failure mode this creates is worth naming: **pi loses the web silently.** No
+> error, no warning — just a model that quietly cannot search. That is why the
+> workspace's `.mcp.json` is pinned by a test.
+
+The two servers, in `pi-workspace/.mcp.json`:
 
 1. **`mcp-server-fetch`** — official, no API key, URL → markdown. Run via
    `uvx mcp-server-fetch` (`uvx` is already installed).
