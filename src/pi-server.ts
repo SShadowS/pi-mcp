@@ -30,10 +30,12 @@ export async function cleanupLivePi(): Promise<number> {
  * are big — if it ever starts echoing the body, the tool becomes worse than
  * useless.
  */
-export function formatAskResult(res: PiResult, outputFile?: string): string {
+export function formatAskResult(res: PiResult, outputFile?: string, continuationId?: string): string {
 	if (!res.ok) return `pi failed: ${res.error}`;
 
-	if (!outputFile) return res.text;
+	const footer = continuationId ? `\n\n[continuation_id: ${continuationId}]` : "";
+
+	if (!outputFile) return res.text + footer;
 
 	const abs = resolve(outputFile);
 	mkdirSync(dirname(abs), { recursive: true });
@@ -42,7 +44,7 @@ export function formatAskResult(res: PiResult, outputFile?: string): string {
 	const words = res.text.trim().split(/\s+/).length;
 	const preview = res.text.slice(0, PREVIEW_CHARS);
 	const ellipsis = res.text.length > PREVIEW_CHARS ? "…" : "";
-	return `Wrote ${words} words to ${abs}\n\nPreview:\n${preview}${ellipsis}`;
+	return `Wrote ${words} words to ${abs}\n\nPreview:\n${preview}${ellipsis}${footer}`;
 }
 
 export function createPiMcpServer(): McpServer {
@@ -53,7 +55,7 @@ export function createPiMcpServer(): McpServer {
 		{
 			title: "Ask a non-Claude model via pi",
 			description:
-				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the GitHub Copilot subscription. Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files, SEARCH the web, and FETCH pages; it CANNOT run a shell, write, or edit. IMPORTANT: give it ABSOLUTE paths — it runs from its own workspace, not your project directory. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id.",
+				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the GitHub Copilot subscription. Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files, SEARCH the web, and FETCH pages; it CANNOT run a shell, write, or edit. IMPORTANT: give it ABSOLUTE paths — it runs from its own workspace, not your project directory. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id. Answers end with [continuation_id: ...]; pass it back as continuation_id to continue that thread with prior turns intact.",
 			inputSchema: {
 				model: z
 					.string()
@@ -77,13 +79,26 @@ export function createPiMcpServer(): McpServer {
 					.describe(
 						"Reasoning effort. Defaults to 'high' — anything less and models answer from priors instead of using their tools. Only lower it for trivial one-shot questions.",
 					),
+				continuation_id: z
+					.string()
+					.optional()
+					.describe(
+						"Continue a previous pi_ask thread. Pass the [continuation_id: ...] value from an earlier answer; the delegate sees its prior turns and files. Omit to start fresh.",
+					),
 			},
 		},
-		async ({ model, prompt, output_file, thinking }) => {
-			const res = await runPi(model, prompt, thinking);
+		async ({ model, prompt, output_file, thinking, continuation_id }) => {
+			// Every call gets a session id — new threads mint one — so EVERY answer
+			// is continuable. The cost is a small session file in .sessions/, which
+			// is why SESSIONS_DIR is ours to sweep.
+			const sessionId = continuation_id ?? crypto.randomUUID();
+			const res = await runPi(model, prompt, thinking, undefined, sessionId);
 			return {
 				content: [
-					{ type: "text" as const, text: formatAskResult(res, output_file) },
+					{
+						type: "text" as const,
+						text: formatAskResult(res, output_file, sessionId),
+					},
 				],
 			};
 		},

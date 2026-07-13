@@ -62,6 +62,13 @@ const TOOLS = "read,mcp";
 export const PI_WORKSPACE = resolve(import.meta.dir, "..", "pi-workspace");
 
 /**
+ * Session files for continuations live INSIDE the workspace, not in the user's
+ * global ~/.pi tree. Two reasons: they are trivially discoverable/deletable,
+ * and pi run from elsewhere will never accidentally resume one of ours.
+ */
+export const SESSIONS_DIR = resolve(PI_WORKSPACE, ".sessions");
+
+/**
  * pi defaults to `medium` thinking, and that is NOT enough for multi-step agentic
  * work — the model answers from priors instead of using its tools.
  *
@@ -92,10 +99,18 @@ export function buildPiArgs(
 	model: string,
 	prompt: string,
 	thinking: ThinkingLevel = DEFAULT_THINKING,
+	sessionId?: string,
 ): string[] {
+	// MCP is stateless; this server — and pi's session files — are not. A
+	// sessionId turns the call into a resumable thread: pi persists the turns
+	// itself and reloads them on the next call with the same id. Without one we
+	// stay ephemeral, exactly as before.
+	const sessionArgs = sessionId
+		? ["--session-id", sessionId, "--session-dir", SESSIONS_DIR]
+		: ["--no-session"];
 	return [
 		"-p",
-		"--no-session",
+		...sessionArgs,
 		"--thinking",
 		thinking,
 		// CONTAMINATION GUARDS. pi loads skills, prompt templates, and CLAUDE.md/
@@ -171,9 +186,10 @@ export async function runPi(
 	prompt: string,
 	thinking?: ThinkingLevel,
 	timeoutMs: number = DEFAULT_TIMEOUT_MS,
+	sessionId?: string,
 ): Promise<PiResult> {
 	try {
-		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt, thinking)], {
+		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt, thinking, sessionId)], {
 			// Never process.cwd(). See the note above: the cwd IS the MCP config,
 			// and running anywhere else silently strips pi's web access.
 			cwd: PI_WORKSPACE,

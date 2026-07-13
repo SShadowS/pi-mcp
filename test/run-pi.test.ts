@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, runPi } from "../src/run-pi.js";
+import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, SESSIONS_DIR, runPi } from "../src/run-pi.js";
 
 describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 	// pi discovers MCP servers ONLY from the .mcp.json in its working directory,
@@ -78,6 +78,32 @@ describe("buildPiArgs", () => {
 		const args = buildPiArgs("gemini-3.1-pro-preview", "what is 2+2");
 		expect(args[args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-preview");
 		expect(args[args.length - 1]).toBe("what is 2+2");
+	});
+});
+
+describe("continuation via pi sessions (BACKLOG 0a)", () => {
+	it("without a sessionId stays ephemeral", () => {
+		const args = buildPiArgs("gpt-5.5", "hi");
+		expect(args).toContain("--no-session");
+		expect(args).not.toContain("--session-id");
+	});
+
+	it("with a sessionId drops --no-session and pins the session dir", () => {
+		// --session-id creates-or-resumes; --session-dir keeps session files
+		// inside the workspace instead of the user's global ~/.pi tree, so they
+		// are ours to find and ours to delete.
+		const args = buildPiArgs("gpt-5.5", "hi", "high", "abc-123");
+		expect(args).not.toContain("--no-session");
+		expect(args[args.indexOf("--session-id") + 1]).toBe("abc-123");
+		expect(args[args.indexOf("--session-dir") + 1]).toBe(SESSIONS_DIR);
+	});
+
+	it("a session run keeps ALL contamination guards", () => {
+		// Multi-turn must not quietly become multi-turn-with-the-caller's-skills.
+		const args = buildPiArgs("gpt-5.5", "hi", "high", "abc-123");
+		for (const g of ["--no-skills", "--no-prompt-templates", "--no-context-files"]) {
+			expect(args).toContain(g);
+		}
 	});
 });
 

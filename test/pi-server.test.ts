@@ -5,6 +5,19 @@ import { join } from "path";
 import { formatAskResult, cleanupLivePi } from "../src/pi-server.js";
 import { livePiPids } from "../src/run-pi.js";
 
+describe("formatAskResult carries the continuation_id", () => {
+	it("appends the id on success so the caller can continue the thread", () => {
+		const out = formatAskResult({ ok: true, text: "answer" }, undefined, "abc-123");
+		expect(out).toContain("answer");
+		expect(out).toContain("[continuation_id: abc-123]");
+	});
+
+	it("omits it on failure — a dead call is not a thread", () => {
+		const out = formatAskResult({ ok: false, error: "boom" }, undefined, "abc-123");
+		expect(out).not.toContain("continuation_id");
+	});
+});
+
 describe("formatAskResult", () => {
 	it("returns the answer inline when no output_file is given", () => {
 		const out = formatAskResult({ ok: true, text: "the answer" }, undefined);
