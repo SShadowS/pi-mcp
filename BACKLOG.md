@@ -8,6 +8,75 @@ Ordered by how much pain it actually caused.
 
 ---
 
+## 0. Steal these three things from PAL (`U:\Git\mcp\pal-mcp-server`)
+
+PAL (formerly Zen MCP) solves the same problem — "call other LLMs from your CLI" —
+and is years ahead. Three of its mechanisms map directly onto pain we already hit.
+Read `utils/conversation_memory.py`, `utils/model_context.py`, and
+`tools/shared/base_models.py`.
+
+### 0a. `continuation_id` — multi-turn WITHOUT pi's RPC mode
+
+**This is the one I got wrong.**
+
+PAL's insight, stated in its own docstring: *MCP is stateless, but the MCP server
+PROCESS is not.* Claude Code spawns the server once and it lives for the whole
+session. So PAL keeps conversation threads in the server's own memory, keyed by a
+`continuation_id` UUID, and a tool call resumes a thread by passing that id back.
+
+It even supports **cross-tool continuation** — start a thread with `analyze`,
+continue it with `codereview`, and the second tool sees the first one's turns and
+files.
+
+I concluded we needed pi's RPC mode to get multi-turn. **We do not.** Our own
+server is already persistent; I treated it as stateless purely because MCP is.
+And pi supports `--session <id>` / `--continue` natively — I disabled it with
+`--no-session` without asking whether we wanted it.
+
+That does NOT make RPC pointless (see #1 — RPC still fixes the process leak,
+because it spawns the MCP servers once rather than per call). But it means
+multi-turn and steering are reachable *today*, cheaply, without it.
+
+### 0b. Newest-first token budgeting with cross-turn file dedup
+
+`utils/conversation_memory.py` + `utils/model_context.py`. Conversation history is
+collected **newest-first**, so when the token budget is tight, **older turns are
+dropped first**. Files referenced across turns are deduplicated into one list
+(newest reference wins). Token budgets are allocated per model based on its actual
+context window — conservative for a 200K model, generous for a 1M one.
+
+We have none of this. Our `output_file` preview trick stops the *caller's* context
+flooding, which is a different problem — it does nothing about the delegate's.
+
+### 0c. FORCE the delegate to declare what it examined — the fix for silent prior-answering
+
+**This is the most valuable one, and it solves #4 and #7 outright.**
+
+PAL's workflow tools make the model fill in a *required* schema:
+
+```
+files_checked:   list of files examined during this step
+relevant_files:  FULL absolute paths to real files
+findings:        evidence and insights discovered
+confidence:      exploring | low | medium | high | almost_certain | certain
+```
+
+Because these are required schema fields, **a model cannot quietly answer from
+priors** — it has to declare what it looked at. Gemini's answer to our detector
+audit would have come back with `files_checked: []`, and the lie would have been
+*visible in the data* instead of hidden in plausible prose.
+
+That is strictly better than my proposal in #4 (tool-use telemetry). Telemetry
+tells you what the harness observed; a required evidence schema makes the model
+commit, on the record, to what it claims to have done — and the two disagree loudly
+when it is bluffing.
+
+**Concrete:** give `pi_ask` a `require_evidence` mode that appends a structured-
+output contract to the prompt and validates the response has non-empty
+`files_checked`. Reject or flag answers that claim conclusions with no evidence.
+
+---
+
 ## 1. Process leak: every call spawns two MCP servers, and a killed call orphans them
 
 **HIGH — this is the one that bit hardest.**
