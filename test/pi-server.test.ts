@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { formatAskResult } from "../src/pi-server.js";
+import { formatAskResult, cleanupLivePi } from "../src/pi-server.js";
+import { livePiPids } from "../src/run-pi.js";
 
 describe("formatAskResult", () => {
 	it("returns the answer inline when no output_file is given", () => {
@@ -42,5 +43,32 @@ describe("formatAskResult", () => {
 			undefined,
 		);
 		expect(out).toContain("boom");
+	});
+});
+
+describe("pi_cleanup — safe reaping, scoped to PIDs WE spawned", () => {
+	it("kills only tracked pi trees and reports the count", async () => {
+		// A fake "pi" stand-in: any long-lived process we own.
+		const stub = Bun.spawn(
+			process.platform === "win32"
+				? ["ping", "-n", "600", "127.0.0.1"]
+				: ["sleep", "600"],
+			{ stdout: "ignore", stderr: "ignore" },
+		);
+		livePiPids.add(stub.pid);
+
+		const killed = await cleanupLivePi();
+		expect(killed).toBeGreaterThanOrEqual(1);
+		expect(livePiPids.size).toBe(0);
+
+		const exited = await Promise.race([
+			stub.exited.then(() => true),
+			new Promise<boolean>((r) => setTimeout(() => r(false), 5_000)),
+		]);
+		expect(exited).toBe(true);
+	});
+
+	it("is a no-op when nothing is tracked", async () => {
+		expect(await cleanupLivePi()).toBe(0);
 	});
 });

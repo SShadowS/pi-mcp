@@ -4,9 +4,22 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { z } from "zod";
-import { type PiResult, PROVIDER, runPi, type ThinkingLevel } from "./run-pi.js";
+import { type PiResult, PROVIDER, runPi, type ThinkingLevel, killTree, livePiPids } from "./run-pi.js";
 
 const PREVIEW_CHARS = 400;
+
+/**
+ * Kill every in-flight pi tree WE spawned. Deliberately scoped to our own
+ * registry: the obvious global cleanup (`taskkill //F //IM python.exe`) took
+ * out the user's pal and serena MCP servers when tried by hand. We only ever
+ * kill trees rooted at PIDs we created.
+ */
+export async function cleanupLivePi(): Promise<number> {
+	const pids = [...livePiPids];
+	livePiPids.clear();
+	await Promise.all(pids.map((pid) => killTree(pid)));
+	return pids.length;
+}
 
 /**
  * Exported for testing. The output_file branch is the reason this tool is usable
@@ -77,6 +90,27 @@ export function createPiMcpServer(): McpServer {
 	);
 
 	server.registerTool(
+		"pi_cleanup",
+		{
+			title: "Kill in-flight pi delegate processes",
+			description:
+				"Kill every pi delegate this server currently has in flight, including their MCP-server children (the fetch/search processes pi spawns per run). Use when a pi_ask seems wedged. Safe: only touches process trees this server created — never other Python or Bun processes on the machine.",
+			inputSchema: {},
+		},
+		async () => {
+			const n = await cleanupLivePi();
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: n === 0 ? "Nothing in flight — no cleanup needed." : `Killed ${n} pi process tree(s).`,
+					},
+				],
+			};
+		},
+	);
+
+	server.registerTool(
 		"pi_models",
 		{
 			title: "List models pi can reach",
@@ -140,6 +174,15 @@ export function createPiMcpServer(): McpServer {
 	);
 
 	return server;
+}
+
+// If Claude Code kills this server mid-call, take our pi trees with us.
+// Best-effort: SIGKILL of the server itself cannot be caught, but the common
+// paths (session end, restart) go through these.
+for (const sig of ["SIGINT", "SIGTERM", "beforeExit"] as const) {
+	process.on(sig, () => {
+		void cleanupLivePi();
+	});
 }
 
 // Only start the transport when run directly, so tests can import this module
