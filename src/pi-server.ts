@@ -129,7 +129,7 @@ export function annotateModels(listing: string): string {
 		.map((line) => {
 			for (const [model, note] of Object.entries(MODEL_NOTES)) {
 				// Match the model as a whole token so gpt-5.5 doesn't hit gpt-5.5-mini.
-				if (new RegExp(`(^|\\s)${model.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}(\\s|$)`).test(line)) {
+				if (new RegExp(`(^|\\s)${model.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`).test(line)) {
 					return `${line}    ← ${note}`;
 				}
 			}
