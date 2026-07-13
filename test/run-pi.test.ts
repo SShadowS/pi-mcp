@@ -1,5 +1,23 @@
 import { describe, expect, it } from "bun:test";
-import { buildPiArgs } from "../src/run-pi.js";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { buildPiArgs, PI_WORKSPACE } from "../src/run-pi.js";
+
+describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
+	// pi discovers MCP servers ONLY from the .mcp.json in its working directory,
+	// and pi has no built-in web access at all. So this file existing, in this
+	// directory, is the entire reason pi can search and fetch. Run pi anywhere
+	// else and it silently loses the web — silently, because pi reports no error,
+	// it just has no servers.
+	it("the workspace has a .mcp.json wiring up fetch and search", () => {
+		const cfgPath = join(PI_WORKSPACE, ".mcp.json");
+		expect(existsSync(cfgPath)).toBe(true);
+
+		const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+		expect(Object.keys(cfg.mcpServers)).toContain("fetch");
+		expect(Object.keys(cfg.mcpServers)).toContain("search");
+	});
+});
 
 describe("buildPiArgs", () => {
 	it("always passes --provider github-copilot", () => {

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "search": {
+      "command": "bun",
+      "args": ["run", "U:/Git/pi-mcp/src/search-server.ts"]
+    }
+  }
+}

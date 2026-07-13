@@ -40,30 +40,28 @@ export function createPiMcpServer(): McpServer {
 		{
 			title: "Ask a non-Claude model via pi",
 			description:
-				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the GitHub Copilot subscription. Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files and reach the web via its own MCP servers; it CANNOT run a shell, write, or edit. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id.",
+				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the GitHub Copilot subscription. Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files, SEARCH the web, and FETCH pages; it CANNOT run a shell, write, or edit. IMPORTANT: give it ABSOLUTE paths — it runs from its own workspace, not your project directory. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id.",
 			inputSchema: {
 				model: z
 					.string()
 					.describe(
 						"Model id, e.g. gpt-5.5, gemini-3.1-pro-preview, claude-fable-5",
 					),
-				prompt: z.string().describe("The full prompt for the sub-agent"),
+				prompt: z
+					.string()
+					.describe(
+						"The full prompt for the sub-agent. Reference files by ABSOLUTE path (e.g. U:/Git/al-perf/src/core/patterns.ts) — the sub-agent does not run in your project directory.",
+					),
 				output_file: z
 					.string()
 					.optional()
 					.describe(
 						"Write the full answer here and return only a preview. Use this for anything long.",
 					),
-				cwd: z
-					.string()
-					.optional()
-					.describe(
-						"Working directory for the sub-agent's file reads (default: server cwd)",
-					),
 			},
 		},
-		async ({ model, prompt, output_file, cwd }) => {
-			const res = await runPi(model, prompt, cwd);
+		async ({ model, prompt, output_file }) => {
+			const res = await runPi(model, prompt);
 			return {
 				content: [
 					{ type: "text" as const, text: formatAskResult(res, output_file) },
