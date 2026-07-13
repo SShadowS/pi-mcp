@@ -48,7 +48,14 @@ import { resolve } from "path";
 
 export type PiResult = { ok: true; text: string } | { ok: false; error: string };
 
-const PROVIDER = "github-copilot";
+/**
+ * pi can reach five providers (anthropic, openai, azure-openai-responses,
+ * openrouter, github-copilot) and ~350 models. We deliberately pin to
+ * github-copilot: it is the subscription this tool exists to spend, and the
+ * others bill to different accounts. Opening them up is a billing decision, not
+ * a technical one — so it is not a parameter.
+ */
+export const PROVIDER = "github-copilot";
 const TOOLS = "read,mcp";
 
 /** The directory holding the .mcp.json that gives pi fetch + search. */

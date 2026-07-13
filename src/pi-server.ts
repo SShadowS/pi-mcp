@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { z } from "zod";
-import { type PiResult, runPi } from "./run-pi.js";
+import { type PiResult, PROVIDER, runPi } from "./run-pi.js";
 
 const PREVIEW_CHARS = 400;
 
@@ -75,10 +75,17 @@ export function createPiMcpServer(): McpServer {
 		{
 			title: "List models pi can reach",
 			description:
-				"List the models available through pi's configured provider. Call this rather than assuming a model id — the list changes.",
-			inputSchema: {},
+				"List models available through pi. Defaults to the github-copilot provider — the only one pi_ask can actually use. Pass all=true to see every provider pi knows about (~350 rows), but note pi_ask cannot reach them.",
+			inputSchema: {
+				all: z
+					.boolean()
+					.optional()
+					.describe(
+						"Show every provider, not just github-copilot. Long — ~350 rows.",
+					),
+			},
 		},
-		async () => {
+		async ({ all }) => {
 			try {
 				const proc = Bun.spawn(["pi", "--list-models"], {
 					stdout: "pipe",
@@ -88,10 +95,29 @@ export function createPiMcpServer(): McpServer {
 					new Response(proc.stdout).text(),
 					proc.exited,
 				]);
-				const text =
-					exitCode === 0 && stdout.trim().length > 0
-						? stdout.trim()
-						: "pi --list-models produced no output. Is pi installed and authenticated?";
+
+				if (exitCode !== 0 || stdout.trim().length === 0) {
+					return {
+						content: [
+							{
+								type: "text" as const,
+								text: "pi --list-models produced no output. Is pi installed and authenticated?",
+							},
+						],
+					};
+				}
+
+				// Default to the provider pi_ask actually uses. The full list is ~350
+				// rows across five providers — dumping it costs the caller thousands of
+				// tokens for models it cannot reach anyway, which is the exact context
+				// flood output_file exists to prevent on the other tool.
+				const lines = stdout.trim().split("\n");
+				const text = all
+					? stdout.trim()
+					: lines
+							.filter((l, i) => i === 0 || l.startsWith(PROVIDER))
+							.join("\n");
+
 				return { content: [{ type: "text" as const, text }] };
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
