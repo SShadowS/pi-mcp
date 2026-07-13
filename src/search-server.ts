@@ -20,7 +20,43 @@
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { z } from "zod";
+
+/**
+ * Read the key from `<repo>/.env` if it is not already in the environment.
+ *
+ * Resolved against this file's own directory, NOT process.cwd(): this server is
+ * spawned by pi, whose cwd is pi-workspace/, so a cwd-relative lookup would miss.
+ *
+ * `.env` is gitignored. The key must NEVER go in pi-workspace/.mcp.json — that
+ * file IS committed, and MCP config supports an `env` block, which is exactly what
+ * makes it a trap: it would work perfectly and quietly put a live key in git.
+ */
+function loadKeyFromDotEnv(): string | undefined {
+	const envPath = resolve(import.meta.dir, "..", ".env");
+	if (!existsSync(envPath)) return undefined;
+
+	for (const line of readFileSync(envPath, "utf8").split("\n")) {
+		const trimmed = line.trim();
+		if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+		const eq = trimmed.indexOf("=");
+		if (eq === -1) continue;
+		if (trimmed.slice(0, eq).trim() !== "SERPAPI_API_KEY") continue;
+		// Strip surrounding quotes if present.
+		return trimmed
+			.slice(eq + 1)
+			.trim()
+			.replace(/^["']|["']$/g, "");
+	}
+	return undefined;
+}
+
+/** Environment wins; .env is the fallback. Exported for testing. */
+export function resolveApiKey(): string | undefined {
+	return process.env.SERPAPI_API_KEY ?? loadKeyFromDotEnv();
+}
 
 interface SerpOrganicResult {
 	title?: string;
@@ -63,13 +99,13 @@ export function createSearchMcpServer(): McpServer {
 			},
 		},
 		async ({ query, num }) => {
-			const key = process.env.SERPAPI_API_KEY;
+			const key = resolveApiKey();
 			if (!key) {
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: "SERPAPI_API_KEY is not set in this process's environment. Web search is unavailable.",
+							text: "SERPAPI_API_KEY is not set. Put it in the environment, or in a .env file at the pi-mcp repo root (gitignored). Web search is unavailable until then.",
 						},
 					],
 				};
