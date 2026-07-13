@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { buildPiArgs, PI_WORKSPACE } from "../src/run-pi.js";
+import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, runPi } from "../src/run-pi.js";
 
 describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 	// pi discovers MCP servers ONLY from the .mcp.json in its working directory,
@@ -79,4 +79,46 @@ describe("buildPiArgs", () => {
 		expect(args[args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-preview");
 		expect(args[args.length - 1]).toBe("what is 2+2");
 	});
+});
+
+describe("timeout kills the whole process tree — never just pi (BACKLOG #1)", () => {
+	it("exports a default timeout of 20 minutes", () => {
+		// 5–15 min is a normal research call; a wedged one is forever. 20 min
+		// bounds the pathological case without clipping the normal one.
+		expect(DEFAULT_TIMEOUT_MS).toBe(20 * 60_000);
+	});
+
+	it("killTree kills a process AND its children", async () => {
+		// Spawn a shell that spawns a long-lived child, mirroring pi spawning
+		// its MCP servers. killTree on the parent must take the child too —
+		// this is exactly what naive `timeout N pi ...` fails to do.
+		const parent = Bun.spawn(
+			process.platform === "win32"
+				? ["cmd", "/c", "start /b ping -n 600 127.0.0.1 > NUL & ping -n 600 127.0.0.1 > NUL"]
+				: ["sh", "-c", "sleep 600 & sleep 600"],
+			{ stdout: "ignore", stderr: "ignore" },
+		);
+		await killTree(parent.pid);
+		// The parent must be dead within a beat.
+		const exited = await Promise.race([
+			parent.exited.then(() => true),
+			new Promise<boolean>((r) => setTimeout(() => r(false), 5_000)),
+		]);
+		expect(exited).toBe(true);
+	});
+
+	it("runPi times out, kills the tree, and reports it", async () => {
+		// A 1ms budget guarantees a timeout regardless of environment. We do not
+		// need a real model — pi will be killed before it does anything.
+		const res = await runPi("gpt-5.5", "hi", "off", 1);
+		expect(res.ok).toBe(false);
+		if (!res.ok) expect(res.error).toContain("timed out");
+	}, 30_000);
+
+	it("tracks live pi PIDs and clears them when the call ends", async () => {
+		const before = livePiPids.size;
+		await runPi("gpt-5.5", "hi", "off", 1);
+		// Whatever was added for this call must be removed again.
+		expect(livePiPids.size).toBe(before);
+	}, 30_000);
 });

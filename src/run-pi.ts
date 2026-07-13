@@ -126,10 +126,51 @@ export function buildPiArgs(
 	];
 }
 
+/**
+ * Kill a process AND all its descendants.
+ *
+ * This exists because of an afternoon spent with 33 orphaned mcp-server-fetch
+ * pythons (BACKLOG #1). pi spawns two MCP servers per run (fetch via uvx→python,
+ * search via bun) and reaps them only on a clean exit. Kill pi alone — which is
+ * what `timeout N pi ...` and a bare proc.kill() both do — and the children
+ * live on forever, each one slowing the next run, causing more timeouts,
+ * orphaning more children. So: any kill goes through here, and here kills the
+ * tree.
+ *
+ * Windows: `taskkill /T` walks the tree natively. POSIX: pi is spawned in its
+ * own process group (see runPi), so a negative-PID signal takes the group.
+ */
+export async function killTree(pid: number): Promise<void> {
+	if (process.platform === "win32") {
+		const p = Bun.spawn(["taskkill", "/PID", String(pid), "/T", "/F"], {
+			stdout: "ignore",
+			stderr: "ignore",
+		});
+		await p.exited;
+	} else {
+		try {
+			process.kill(-pid, "SIGKILL"); // whole process group
+		} catch {
+			try {
+				process.kill(pid, "SIGKILL"); // group gone; try the pid alone
+			} catch {
+				/* already dead — the desired state */
+			}
+		}
+	}
+}
+
+/** PIDs of pi processes currently in flight. Read by pi_cleanup and the exit reaper. */
+export const livePiPids = new Set<number>();
+
+/** 20 minutes: a real research call takes 5–15; only a wedged one exceeds this. */
+export const DEFAULT_TIMEOUT_MS = 20 * 60_000;
+
 export async function runPi(
 	model: string,
 	prompt: string,
 	thinking?: ThinkingLevel,
+	timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<PiResult> {
 	try {
 		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt, thinking)], {
@@ -139,28 +180,45 @@ export async function runPi(
 			stdout: "pipe",
 			stderr: "pipe",
 		});
+		livePiPids.add(proc.pid);
 
-		const [stdout, stderr, exitCode] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-			proc.exited,
-		]);
+		let timedOut = false;
+		const timer = setTimeout(async () => {
+			timedOut = true;
+			await killTree(proc.pid);
+		}, timeoutMs);
 
-		if (exitCode !== 0) {
-			return {
-				ok: false,
-				error: `pi exited ${exitCode}: ${stderr.trim() || stdout.trim() || "(no output)"}`,
-			};
+		try {
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(proc.stdout).text(),
+				new Response(proc.stderr).text(),
+				proc.exited,
+			]);
+
+			if (timedOut) {
+				return {
+					ok: false,
+					error: `pi timed out after ${Math.round(timeoutMs / 1000)}s — killed process tree (pid ${proc.pid})`,
+				};
+			}
+			if (exitCode !== 0) {
+				return {
+					ok: false,
+					error: `pi exited ${exitCode}: ${stderr.trim() || stdout.trim() || "(no output)"}`,
+				};
+			}
+			const text = stdout.trim();
+			if (text.length === 0) {
+				return {
+					ok: false,
+					error: `pi produced no output. stderr: ${stderr.trim()}`,
+				};
+			}
+			return { ok: true, text };
+		} finally {
+			clearTimeout(timer);
+			livePiPids.delete(proc.pid);
 		}
-
-		const text = stdout.trim();
-		if (text.length === 0) {
-			return {
-				ok: false,
-				error: `pi produced no output. stderr: ${stderr.trim()}`,
-			};
-		}
-		return { ok: true, text };
 	} catch (err) {
 		// The common case is pi not being on PATH. Say so, rather than surfacing a
 		// raw ENOENT that reads like a bug in this server.
