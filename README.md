@@ -92,12 +92,16 @@ In `~/.claude/settings.json`:
 }
 ```
 
-### 2. Set the SerpAPI key
+### 2. Set a search API key
 
-Web search needs a [SerpAPI](https://serpapi.com) key. **It is never stored in
-this repo** — it is read from the environment at call time.
+Web search needs a [Serper.dev](https://serper.dev) key (preferred — cheaper,
+faster) or a [SerpAPI](https://serpapi.com) key (fallback; used only when no
+Serper key is present). **Keys are never stored in this repo** — they are read
+from the environment (or a gitignored `.env` at the repo root) at call time.
 
 ```powershell
+[Environment]::SetEnvironmentVariable("SERPER_API_KEY", "<your-key>", "User")
+# or
 [Environment]::SetEnvironmentVariable("SERPAPI_API_KEY", "<your-key>", "User")
 ```
 
