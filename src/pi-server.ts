@@ -109,6 +109,35 @@ export function evidenceVerdict(e: Evidence | null): string {
 	return `Evidence: ${files}${searches}, confidence ${e.confidence}.\n${e.files_checked.map((f) => `  - ${f}`).join("\n")}`;
 }
 
+/**
+ * Measured on an identical multi-step research task (read 3 files, search the
+ * web, synthesize) — BACKLOG #4. Only models we have actually measured get a
+ * note; inventing ratings would recreate the problem this solves.
+ */
+export const MODEL_NOTES: Record<string, string> = {
+	"gpt-5.5":
+		"RELIABLE for agentic work: did the full task at default thinking (2295 words, real file:line cites).",
+	"gemini-3.1-pro-preview":
+		"needs thinking=high (the default): at medium it answered from priors without opening a file, confidently wrong.",
+	"claude-fable-5":
+		"needs thinking=high (the default): at medium it claimed it could not find files it was handed absolute paths to.",
+};
+
+export function annotateModels(listing: string): string {
+	return listing
+		.split("\n")
+		.map((line) => {
+			for (const [model, note] of Object.entries(MODEL_NOTES)) {
+				// Match the model as a whole token so gpt-5.5 doesn't hit gpt-5.5-mini.
+				if (new RegExp(`(^|\\s)${model.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}(\\s|$)`).test(line)) {
+					return `${line}    ← ${note}`;
+				}
+			}
+			return line;
+		})
+		.join("\n");
+}
+
 export function createPiMcpServer(): McpServer {
 	const server = new McpServer({ name: "pi", version: "0.1.0" });
 
@@ -247,7 +276,7 @@ export function createPiMcpServer(): McpServer {
 							.filter((l, i) => i === 0 || l.startsWith(PROVIDER))
 							.join("\n");
 
-				return { content: [{ type: "text" as const, text }] };
+				return { content: [{ type: "text" as const, text: annotateModels(text) }] };
 			} catch (err) {
 				const msg = err instanceof Error ? err.message : String(err);
 				return {

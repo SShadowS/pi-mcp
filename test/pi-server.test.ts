@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { formatAskResult, cleanupLivePi, EVIDENCE_CONTRACT, evidenceVerdict, extractEvidence } from "../src/pi-server.js";
+import { formatAskResult, cleanupLivePi, EVIDENCE_CONTRACT, evidenceVerdict, extractEvidence, annotateModels, MODEL_NOTES } from "../src/pi-server.js";
 import { livePiPids } from "../src/run-pi.js";
 
 describe("formatAskResult carries the continuation_id", () => {
@@ -143,5 +143,28 @@ describe("require_evidence — the fix for silent prior-answering (BACKLOG 0c)",
 		for (const field of ["files_checked", "searches_performed", "confidence"]) {
 			expect(EVIDENCE_CONTRACT).toContain(field);
 		}
+	});
+});
+
+describe("pi_models reliability annotations (BACKLOG #4)", () => {
+	it("annotates rows for models we have measured", () => {
+		const listing = [
+			"provider          model",
+			"github-copilot    gpt-5.5",
+			"github-copilot    gemini-3.1-pro-preview",
+			"github-copilot    some-untested-model",
+		].join("\n");
+		const out = annotateModels(listing);
+		expect(out).toContain("gpt-5.5    ←");
+		expect(out).toContain("gemini-3.1-pro-preview    ←");
+		// Untested rows pass through untouched — no invented ratings.
+		expect(out).toContain("github-copilot    some-untested-model");
+		expect(out.split("\n")[3]).not.toContain("←");
+	});
+
+	it("notes exist for the three models we actually measured", () => {
+		expect(MODEL_NOTES["gpt-5.5"]).toBeTruthy();
+		expect(MODEL_NOTES["gemini-3.1-pro-preview"]).toBeTruthy();
+		expect(MODEL_NOTES["claude-fable-5"]).toBeTruthy();
 	});
 });
