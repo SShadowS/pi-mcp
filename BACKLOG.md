@@ -17,6 +17,8 @@ Read `utils/conversation_memory.py`, `utils/model_context.py`, and
 
 ### 0a. `continuation_id` — multi-turn WITHOUT pi's RPC mode
 
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+
 **This is the one I got wrong.**
 
 PAL's insight, stated in its own docstring: *MCP is stateless, but the MCP server
@@ -39,6 +41,8 @@ multi-turn and steering are reachable *today*, cheaply, without it.
 
 ### 0b. Newest-first token budgeting with cross-turn file dedup
 
+**DEFERRED: pi's own --session-id files carry history since Task 3; revisit if delegates blow their context windows.**
+
 `utils/conversation_memory.py` + `utils/model_context.py`. Conversation history is
 collected **newest-first**, so when the token budget is tight, **older turns are
 dropped first**. Files referenced across turns are deduplicated into one list
@@ -49,6 +53,8 @@ We have none of this. Our `output_file` preview trick stops the *caller's* conte
 flooding, which is a different problem — it does nothing about the delegate's.
 
 ### 0c. FORCE the delegate to declare what it examined — the fix for silent prior-answering
+
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
 
 **This is the most valuable one, and it solves #4 and #7 outright.**
 
@@ -78,6 +84,8 @@ output contract to the prompt and validates the response has non-empty
 ---
 
 ## 1. Process leak: every call spawns two MCP servers, and a killed call orphans them
+
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
 
 **HIGH — this is the one that bit hardest.**
 
@@ -117,6 +125,8 @@ kill the whole process tree, not just pi.
 
 ## 2. No runtime bound at all
 
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+
 **MEDIUM.**
 
 `pi_ask` blocks until pi returns. A research call takes 5–15 minutes; a wedged one
@@ -128,6 +138,8 @@ Needs to be solved *together* with #1: a bound that kills the process tree.
 ---
 
 ## 3. The MCP server must be restarted to pick up code changes
+
+**DOCUMENTED in README "Sharp edges".**
 
 **MEDIUM — pure friction, but it wasted real time.**
 
@@ -145,6 +157,8 @@ and exit on change (Claude Code would respawn it).
 ---
 
 ## 4. Model reliability varies enormously, and the tool says nothing about it
+
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
 
 **MEDIUM.**
 
@@ -176,6 +190,8 @@ that it had never read the code.
 
 ## 5. `pi_models` is cwd-dependent and I do not know why
 
+**DOCUMENTED in README "Sharp edges".**
+
 **LOW, but it is an unexplained inconsistency and those tend to matter later.**
 
 `pi --list-models` returns ~350 rows (5 providers) when run from one directory and
@@ -185,6 +201,8 @@ the caller either way, but the underlying behavior is not understood.
 ---
 
 ## 6. Only `github-copilot` is reachable
+
+**DOCUMENTED in README "Sharp edges".**
 
 **LOW — deliberate, but worth revisiting consciously.**
 
@@ -200,6 +218,8 @@ openrouter would widen the family spread considerably beyond "GPT or Gemini".
 ---
 
 ## 7. `pi_ask` cannot show its work
+
+**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
 
 **LOW.**
 
