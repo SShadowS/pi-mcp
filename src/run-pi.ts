@@ -179,6 +179,7 @@ export async function runPi(
 			cwd: PI_WORKSPACE,
 			stdout: "pipe",
 			stderr: "pipe",
+			detached: process.platform !== "win32",
 		});
 		livePiPids.add(proc.pid);
 
