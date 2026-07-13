@@ -43,6 +43,22 @@ describe("buildPiArgs", () => {
 		expect(args).toContain("--no-session");
 	});
 
+	it("defaults to HIGH thinking — anything less and models skip their tools", () => {
+		// Measured, not guessed. At pi's default (medium), given "read these three
+		// files and audit them": Gemini wrote 443 words from priors without opening
+		// a file; Fable claimed it could not find files it had been handed absolute
+		// paths to. At high, Fable read the file and quoted the deciding line.
+		// A delegate that answers from priors is worse than useless — it is
+		// confidently wrong and it looks like an answer.
+		const args = buildPiArgs("gpt-5.5", "hi");
+		expect(args[args.indexOf("--thinking") + 1]).toBe("high");
+	});
+
+	it("thinking is overridable", () => {
+		const args = buildPiArgs("gpt-5.5", "hi", "low");
+		expect(args[args.indexOf("--thinking") + 1]).toBe("low");
+	});
+
 	it("does not inherit the caller's skills, templates, or context files", () => {
 		// The whole point of this tool is an INDEPENDENT opinion from another model
 		// family. pi loads ~/.claude/skills by default — the SAME skills the calling

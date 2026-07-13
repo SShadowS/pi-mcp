@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { z } from "zod";
-import { type PiResult, PROVIDER, runPi } from "./run-pi.js";
+import { type PiResult, PROVIDER, runPi, type ThinkingLevel } from "./run-pi.js";
 
 const PREVIEW_CHARS = 400;
 
@@ -58,10 +58,16 @@ export function createPiMcpServer(): McpServer {
 					.describe(
 						"Write the full answer here and return only a preview. Use this for anything long.",
 					),
+				thinking: z
+					.enum(["off", "minimal", "low", "medium", "high", "xhigh"])
+					.optional()
+					.describe(
+						"Reasoning effort. Defaults to 'high' — anything less and models answer from priors instead of using their tools. Only lower it for trivial one-shot questions.",
+					),
 			},
 		},
-		async ({ model, prompt, output_file }) => {
-			const res = await runPi(model, prompt);
+		async ({ model, prompt, output_file, thinking }) => {
+			const res = await runPi(model, prompt, thinking);
 			return {
 				content: [
 					{ type: "text" as const, text: formatAskResult(res, output_file) },

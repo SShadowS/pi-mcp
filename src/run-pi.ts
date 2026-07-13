@@ -61,10 +61,43 @@ const TOOLS = "read,mcp";
 /** The directory holding the .mcp.json that gives pi fetch + search. */
 export const PI_WORKSPACE = resolve(import.meta.dir, "..", "pi-workspace");
 
-export function buildPiArgs(model: string, prompt: string): string[] {
+/**
+ * pi defaults to `medium` thinking, and that is NOT enough for multi-step agentic
+ * work — the model answers from priors instead of using its tools.
+ *
+ * Measured, not guessed. Given "read these three files and audit them", at medium:
+ *   - Gemini 3.1 Pro wrote 443 words from general knowledge, never opening a file.
+ *   - Fable 5 claimed it "can't locate the tool" despite being handed absolute paths.
+ *   - GPT-5.5 was the only one that did the work (2295 words, real file:line cites).
+ * At `high`, Fable read the file, found the exact deciding line, and quoted it.
+ *
+ * Both models could read files fine when asked to read ONE file. The failure is
+ * specifically sustaining a multi-tool loop, and thinking level is the lever.
+ *
+ * So: default to `high`. A delegate that answers from priors instead of reading
+ * the code is worse than useless — it is confidently wrong, and it looks like an
+ * answer.
+ */
+export type ThinkingLevel =
+	| "off"
+	| "minimal"
+	| "low"
+	| "medium"
+	| "high"
+	| "xhigh";
+
+const DEFAULT_THINKING: ThinkingLevel = "high";
+
+export function buildPiArgs(
+	model: string,
+	prompt: string,
+	thinking: ThinkingLevel = DEFAULT_THINKING,
+): string[] {
 	return [
 		"-p",
 		"--no-session",
+		"--thinking",
+		thinking,
 		// CONTAMINATION GUARDS. pi loads skills, prompt templates, and CLAUDE.md/
 		// AGENTS.md from the user's global config by default — including
 		// ~/.claude/skills, the SAME skills the calling Claude has.
@@ -93,9 +126,13 @@ export function buildPiArgs(model: string, prompt: string): string[] {
 	];
 }
 
-export async function runPi(model: string, prompt: string): Promise<PiResult> {
+export async function runPi(
+	model: string,
+	prompt: string,
+	thinking?: ThinkingLevel,
+): Promise<PiResult> {
 	try {
-		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt)], {
+		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt, thinking)], {
 			// Never process.cwd(). See the note above: the cwd IS the MCP config,
 			// and running anywhere else silently strips pi's web access.
 			cwd: PI_WORKSPACE,
