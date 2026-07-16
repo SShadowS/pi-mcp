@@ -95,9 +95,26 @@ export type ThinkingLevel =
 
 const DEFAULT_THINKING: ThinkingLevel = "high";
 
+/**
+ * THE PROMPT NEVER RIDES IN ARGV. It is delivered on stdin (see runPi).
+ *
+ * On Windows, `pi` resolves to the npm `pi.cmd` shim, and spawning a .cmd goes
+ * through cmd.exe — whose command line TERMINATES AT THE FIRST NEWLINE. A
+ * multiline prompt passed as an argv element silently truncates to its first
+ * line: the delegate answers "you didn't send the proposal" while looking like
+ * it got the prompt. Metachars (`>`, `<`, `&`, `|`) in the prompt are live cmd
+ * syntax on that path too (a stray `> file` redirect is how a pwned.txt once
+ * appeared in this repo).
+ *
+ * Probed against the real binary (2026-07-17):
+ *   - argv prompt, multiline: delegate received ONLY line 1 (4/4 calls).
+ *   - `@file` message args: pi hangs in -p mode, with or without a trailing
+ *     message (3/3 probes, exit only by timeout). Dead route.
+ *   - stdin: multiline + metachar prompt arrived intact ("STDIN-OK-55" probe,
+ *     model quoted line 1's metachars and obeyed line 2).
+ */
 export function buildPiArgs(
 	model: string,
-	prompt: string,
 	thinking: ThinkingLevel = DEFAULT_THINKING,
 	sessionId?: string,
 ): string[] {
@@ -137,7 +154,6 @@ export function buildPiArgs(
 		model,
 		"--tools",
 		TOOLS,
-		prompt,
 	];
 }
 
@@ -189,10 +205,15 @@ export async function runPi(
 	sessionId?: string,
 ): Promise<PiResult> {
 	try {
-		const proc = Bun.spawn(["pi", ...buildPiArgs(model, prompt, thinking, sessionId)], {
+		const proc = Bun.spawn(["pi", ...buildPiArgs(model, thinking, sessionId)], {
 			// Never process.cwd(). See the note above: the cwd IS the MCP config,
 			// and running anywhere else silently strips pi's web access.
 			cwd: PI_WORKSPACE,
+			// The prompt travels on stdin, NEVER argv — the .cmd shim's cmd.exe
+			// command line truncates at the first newline and interprets metachars
+			// (see buildPiArgs's doc). pi -p with no message args reads the prompt
+			// from stdin; probed 2026-07-17.
+			stdin: Buffer.from(prompt, "utf8"),
 			stdout: "pipe",
 			stderr: "pipe",
 			detached: process.platform !== "win32",

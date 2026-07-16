@@ -23,13 +23,13 @@ describe("buildPiArgs", () => {
 	it("always passes --provider github-copilot", () => {
 		// Without this, pi falls back to an unauthenticated provider and prints a
 		// login prompt instead of an answer. Verified against the real binary.
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		expect(args).toContain("--provider");
 		expect(args[args.indexOf("--provider") + 1]).toBe("github-copilot");
 	});
 
 	it("leashes pi to read,mcp — never bash, write, or edit", () => {
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		const tools = args[args.indexOf("--tools") + 1];
 		expect(tools).toBe("read,mcp");
 		expect(tools).not.toContain("bash");
@@ -38,7 +38,7 @@ describe("buildPiArgs", () => {
 	});
 
 	it("runs non-interactive and ephemeral", () => {
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		expect(args).toContain("-p");
 		expect(args).toContain("--no-session");
 	});
@@ -50,12 +50,12 @@ describe("buildPiArgs", () => {
 		// paths to. At high, Fable read the file and quoted the deciding line.
 		// A delegate that answers from priors is worse than useless — it is
 		// confidently wrong and it looks like an answer.
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		expect(args[args.indexOf("--thinking") + 1]).toBe("high");
 	});
 
 	it("thinking is overridable", () => {
-		const args = buildPiArgs("gpt-5.5", "hi", "low");
+		const args = buildPiArgs("gpt-5.5", "low");
 		expect(args[args.indexOf("--thinking") + 1]).toBe("low");
 	});
 
@@ -68,22 +68,34 @@ describe("buildPiArgs", () => {
 		// This is not hypothetical: Gemini once answered a "read these three files
 		// and audit them" prompt from an al-sem-detector skill it found in
 		// ~/.claude/skills, never opening the code.
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		expect(args).toContain("--no-skills");
 		expect(args).toContain("--no-prompt-templates");
 		expect(args).toContain("--no-context-files");
 	});
 
-	it("passes the model through and puts the prompt last", () => {
-		const args = buildPiArgs("gemini-3.1-pro-preview", "what is 2+2");
+	it("passes the model through and argv NEVER carries the prompt", () => {
+		// The prompt travels on stdin (see runPi). On Windows the npm pi.cmd shim
+		// routes argv through cmd.exe, whose command line truncates at the first
+		// newline and interprets `>` `<` `&` `|` — a multiline prompt as an argv
+		// element silently arrived as its first line only. Every element here must
+		// be a flag or a flag value; anything else is the bug coming back.
+		const args = buildPiArgs("gemini-3.1-pro-preview");
 		expect(args[args.indexOf("--model") + 1]).toBe("gemini-3.1-pro-preview");
-		expect(args[args.length - 1]).toBe("what is 2+2");
+		const flagValues = new Set([
+			"--thinking", "--provider", "--model", "--tools", "--session-id", "--session-dir",
+		]);
+		for (let i = 0; i < args.length; i++) {
+			const isFlag = args[i].startsWith("-");
+			const isFlagValue = i > 0 && flagValues.has(args[i - 1]);
+			expect(isFlag || isFlagValue).toBe(true);
+		}
 	});
 });
 
 describe("continuation via pi sessions (BACKLOG 0a)", () => {
 	it("without a sessionId stays ephemeral", () => {
-		const args = buildPiArgs("gpt-5.5", "hi");
+		const args = buildPiArgs("gpt-5.5");
 		expect(args).toContain("--no-session");
 		expect(args).not.toContain("--session-id");
 	});
@@ -92,7 +104,7 @@ describe("continuation via pi sessions (BACKLOG 0a)", () => {
 		// --session-id creates-or-resumes; --session-dir keeps session files
 		// inside the workspace instead of the user's global ~/.pi tree, so they
 		// are ours to find and ours to delete.
-		const args = buildPiArgs("gpt-5.5", "hi", "high", "abc-123");
+		const args = buildPiArgs("gpt-5.5", "high", "abc-123");
 		expect(args).not.toContain("--no-session");
 		expect(args[args.indexOf("--session-id") + 1]).toBe("abc-123");
 		expect(args[args.indexOf("--session-dir") + 1]).toBe(SESSIONS_DIR);
@@ -100,11 +112,35 @@ describe("continuation via pi sessions (BACKLOG 0a)", () => {
 
 	it("a session run keeps ALL contamination guards", () => {
 		// Multi-turn must not quietly become multi-turn-with-the-caller's-skills.
-		const args = buildPiArgs("gpt-5.5", "hi", "high", "abc-123");
+		const args = buildPiArgs("gpt-5.5", "high", "abc-123");
 		for (const g of ["--no-skills", "--no-prompt-templates", "--no-context-files"]) {
 			expect(args).toContain(g);
 		}
 	});
+});
+
+describe("prompt delivery (integration — hits the real API)", () => {
+	it(
+		"a multiline prompt with cmd metachars arrives INTACT",
+		async () => {
+			// THE regression test for the 2026-07-17 truncation bug: prompts passed
+			// as argv reached the delegate as their FIRST LINE ONLY (npm .cmd shim →
+			// cmd.exe → command line ends at the first newline), and `>` `<` `&` `|`
+			// were live shell syntax. Four real review requests failed exactly this
+			// way — the delegate kept replying "you didn't send the proposal".
+			// The marker lives on line 3: if the channel truncates, the model cannot
+			// know it, no matter how it feels about line 1.
+			const prompt = [
+				"Line 1 has cmd metachars: 4 > 1, a < b, x & y, p | q.",
+				"Line 2 is filler to prove multiline delivery.",
+				"Line 3: reply with ONLY the marker STDIN-INTACT-31. Nothing else.",
+			].join("\n");
+			const res = await runPi("gpt-5-mini", prompt, "off");
+			expect(res.ok).toBe(true);
+			if (res.ok) expect(res.text).toContain("STDIN-INTACT-31");
+		},
+		180_000,
+	);
 });
 
 describe("timeout kills the whole process tree — never just pi (BACKLOG #1)", () => {
