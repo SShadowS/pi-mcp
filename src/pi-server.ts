@@ -146,7 +146,7 @@ export function createPiMcpServer(): McpServer {
 		{
 			title: "Ask a non-Claude model via pi",
 			description:
-				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the GitHub Copilot subscription. Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files, SEARCH the web, and FETCH pages; it CANNOT run a shell, write, or edit. IMPORTANT: give it ABSOLUTE paths — it runs from its own workspace, not your project directory. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id. Answers end with [continuation_id: ...]; pass it back as continuation_id to continue that thread with prior turns intact.",
+				"Delegate a question to a model from another family (GPT-5.5, Gemini 3.1 Pro, Fable 5, Opus 4.x) through pi, billed to the subscription selected by PI_MCP_PROVIDER (default GitHub Copilot; openai-codex = ChatGPT subscription). Use this when an independent, uncorrelated opinion is worth more than another Claude's — research, adversarial review, second opinions. The sub-agent can READ files, SEARCH the web, and FETCH pages; it CANNOT run a shell, write, or edit. IMPORTANT: give it ABSOLUTE paths — it runs from its own workspace, not your project directory. Pass output_file for long answers: it writes the full text to disk and returns only a preview, which keeps a multi-model fan-out from flooding your context. Call pi_models to see what is available rather than guessing a model id. Answers end with [continuation_id: ...]; pass it back as continuation_id to continue that thread with prior turns intact.",
 			inputSchema: {
 				model: z
 					.string()
@@ -233,13 +233,13 @@ export function createPiMcpServer(): McpServer {
 		{
 			title: "List models pi can reach",
 			description:
-				"List models available through pi. Defaults to the github-copilot provider — the only one pi_ask can actually use. Pass all=true to see every provider pi knows about (~350 rows), but note pi_ask cannot reach them.",
+				"List models available through pi. Defaults to the provider pi_ask actually uses (PI_MCP_PROVIDER, default github-copilot). Pass all=true to see every provider pi knows about (~350 rows), but note pi_ask cannot reach them.",
 			inputSchema: {
 				all: z
 					.boolean()
 					.optional()
 					.describe(
-						"Show every provider, not just github-copilot. Long — ~350 rows.",
+						"Show every provider, not just the one pi_ask uses. Long — ~350 rows.",
 					),
 			},
 		},

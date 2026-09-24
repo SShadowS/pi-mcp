@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, SESSIONS_DIR, runPi } from "../src/run-pi.js";
+import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, SESSIONS_DIR, runPi, resolveProvider } from "../src/run-pi.js";
 
 describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 	// pi discovers MCP servers ONLY from the .mcp.json in its working directory,
@@ -16,6 +16,21 @@ describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 		const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
 		expect(Object.keys(cfg.mcpServers)).toContain("fetch");
 		expect(Object.keys(cfg.mcpServers)).toContain("search");
+	});
+});
+
+describe("resolveProvider — PI_MCP_PROVIDER picks the subscription", () => {
+	it("defaults to github-copilot when unset or empty", () => {
+		expect(resolveProvider(undefined)).toBe("github-copilot");
+		expect(resolveProvider("")).toBe("github-copilot");
+	});
+	it("accepts the ChatGPT subscription provider", () => {
+		expect(resolveProvider("openai-codex")).toBe("openai-codex");
+	});
+	it("refuses pay-per-token providers: that is a billing decision", () => {
+		expect(() => resolveProvider("openrouter")).toThrow();
+		expect(() => resolveProvider("openai")).toThrow();
+		expect(() => resolveProvider("anthropic")).toThrow();
 	});
 });
 

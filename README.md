@@ -150,12 +150,17 @@ From some directories pi lists ~350 models across 5 providers; from others,
 to github-copilot regardless, so callers are protected either way — but if
 you are debugging model lists by hand, know that your cwd changes the answer.
 
-### Provider is pinned to github-copilot on purpose
-pi can reach anthropic, openai, azure-openai-responses, and openrouter. Those
-bill to different accounts, so `pi_ask` deliberately cannot select them — it
-is a billing decision, not a technical one (BACKLOG #6). Widening model
-diversity via openrouter is a conscious decision for a human to make, in
-`src/run-pi.ts` (`PROVIDER`).
+### Provider: subscriptions only, chosen per registration
+`pi_ask` only uses flat-rate subscription providers: `github-copilot` (default)
+and `openai-codex` (ChatGPT subscription). Pick one per MCP registration with
+the `PI_MCP_PROVIDER` env var, for example:
+
+    claude mcp add pi -s user -e PI_MCP_PROVIDER=openai-codex -- bun run U:/Git/pi-mcp/src/pi-server.ts
+
+Pay-per-token providers (anthropic, openai, openrouter, ...) are refused at
+startup: opening them up is a billing decision, not a technical one (BACKLOG
+#6). Model ids differ per provider; call `pi_models` after switching.
+`openai-codex` models have a 272K context, smaller than Copilot's.
 
 ### If a call wedges: `pi_cleanup`, never `taskkill //IM`
 `pi_cleanup` kills only the process trees this server spawned. The blunt

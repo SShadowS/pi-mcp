@@ -49,13 +49,23 @@ import { resolve } from "path";
 export type PiResult = { ok: true; text: string } | { ok: false; error: string };
 
 /**
- * pi can reach five providers (anthropic, openai, azure-openai-responses,
- * openrouter, github-copilot) and ~350 models. We deliberately pin to
- * github-copilot: it is the subscription this tool exists to spend, and the
- * others bill to different accounts. Opening them up is a billing decision, not
- * a technical one — so it is not a parameter.
+ * pi can reach several providers and ~350 models. Only flat-rate SUBSCRIPTION
+ * providers are allowed: github-copilot (default) and openai-codex (ChatGPT
+ * subscription). The pay-per-token ones (anthropic, openai, openrouter, ...)
+ * bill per call, and opening them up is a billing decision, not a technical one,
+ * so they are refused. The operator picks the subscription per MCP registration
+ * with PI_MCP_PROVIDER; it is deliberately not a per-call parameter.
  */
-export const PROVIDER = "github-copilot";
+const SUBSCRIPTION_PROVIDERS = ["github-copilot", "openai-codex"] as const;
+export type Provider = (typeof SUBSCRIPTION_PROVIDERS)[number];
+
+export function resolveProvider(value: string | undefined): Provider {
+	if (!value) return "github-copilot";
+	if ((SUBSCRIPTION_PROVIDERS as readonly string[]).includes(value)) return value as Provider;
+	throw new Error(`PI_MCP_PROVIDER=${value} is not allowed; use one of ${SUBSCRIPTION_PROVIDERS.join(", ")}`);
+}
+
+export const PROVIDER = resolveProvider(process.env.PI_MCP_PROVIDER);
 const TOOLS = "read,mcp";
 
 /** The directory holding the .mcp.json that gives pi fetch + search. */
