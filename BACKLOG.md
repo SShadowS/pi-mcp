@@ -1,230 +1,121 @@
-# pi-mcp — Backlog
+# pi-mcp: Backlog
 
-Deferred work. Everything here was learned by using the tool in anger on a real
-task (auditing al-perf's 18 detectors across three model families), not
+Deferred work. Everything here was learned by using the tool in anger on real
+tasks (first: auditing al-perf's 18 detectors across three model families), not
 speculated.
 
-Ordered by how much pain it actually caused.
+Open items come first, ordered by how much pain they cause. Resolved items are
+kept at the bottom as a short record of what was learned.
 
 ---
 
-## 0. Steal these three things from PAL (`U:\Git\mcp\pal-mcp-server`)
+## Open
 
-PAL (formerly Zen MCP) solves the same problem — "call other LLMs from your CLI" —
-and is years ahead. Three of its mechanisms map directly onto pain we already hit.
-Read `utils/conversation_memory.py`, `utils/model_context.py`, and
-`tools/shared/base_models.py`.
+### 1. Search errors hide their cause
 
-### 0a. `continuation_id` — multi-turn WITHOUT pi's RPC mode
+**MEDIUM. Hit on 2026-09-30.**
 
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+Serper returned HTTP 400 and the delegate saw only `Serper returned HTTP 400.`
+The body said `{"message":"Not enough credits"}`, which took a manual probe to
+find. A delegate cannot act on a bare status code, and neither can the human
+reading its answer.
 
-**This is the one I got wrong.**
+- Include Serper's `message` (and SerpAPI's `error`) in the tool result. Never
+  echo request headers, since those carry the key.
+- Consider falling back to SerpAPI when Serper reports exhausted credits. This
+  reverses the current "no cross-provider retry" rule in `search-server.ts`, so
+  decide it deliberately; a credit error is not a transient HTTP failure.
 
-PAL's insight, stated in its own docstring: *MCP is stateless, but the MCP server
-PROCESS is not.* Claude Code spawns the server once and it lives for the whole
-session. So PAL keeps conversation threads in the server's own memory, keyed by a
-`continuation_id` UUID, and a tool call resumes a thread by passing that id back.
+### 2. Tests depend on the local `.env`
 
-It even supports **cross-tool continuation** — start a thread with `analyze`,
-continue it with `codereview`, and the second tool sees the first one's turns and
-files.
+**MEDIUM. Two tests fail on a machine whose `.env` sets `PI_MCP_PROVIDER`.**
 
-I concluded we needed pi's RPC mode to get multi-turn. **We do not.** Our own
-server is already persistent; I treated it as stateless purely because MCP is.
-And pi supports `--session <id>` / `--continue` natively — I disabled it with
-`--no-session` without asking whether we wanted it.
+`PROVIDER` in `src/run-pi.ts` is resolved from `process.env` at module load, and
+Bun auto-loads `.env` from the cwd. With `PI_MCP_PROVIDER=openai-codex`:
 
-That does NOT make RPC pointless (see #1 — RPC still fixes the process leak,
-because it spawns the MCP servers once rather than per call). But it means
-multi-turn and steering are reachable *today*, cheaply, without it.
+- `buildPiArgs > always passes --provider github-copilot` fails. It asserts the
+  default, but the default is whatever the environment says.
+- `prompt delivery > a multiline prompt ... arrives INTACT` fails, probably
+  because it uses a Copilot model id against the codex provider.
 
-### 0b. Newest-first token budgeting with cross-turn file dedup
+Fix: let `buildPiArgs` take the provider as a parameter (default `PROVIDER`) and
+assert explicitly in the unit test; make the integration tests pick a model id
+that matches `PROVIDER`, or skip them when it is not `github-copilot`.
 
-**DEFERRED: pi's own --session-id files carry history since Task 3; revisit if delegates blow their context windows.**
+### 3. Code changes need a Claude Code restart
 
-`utils/conversation_memory.py` + `utils/model_context.py`. Conversation history is
-collected **newest-first**, so when the token budget is tight, **older turns are
-dropped first**. Files referenced across turns are deduplicated into one list
-(newest reference wins). Token budgets are allocated per model based on its actual
-context window — conservative for a 200K model, generous for a 1M one.
+**LOW. Documented in README "Sharp edges". Friction, not breakage.**
 
-We have none of this. Our `output_file` preview trick stops the *caller's* context
-flooding, which is a different problem — it does nothing about the delegate's.
+Claude Code spawns the server once per session. Edits to `src/` do nothing until
+a restart or `/mcp` reconnect, and the tool keeps behaving the old way with no
+hint. This cost real time twice (the `--no-skills` and `--thinking high` fixes).
 
-### 0c. FORCE the delegate to declare what it examined — the fix for silent prior-answering
+Option if it keeps biting: have the server watch its own source and exit on
+change, so Claude Code respawns it.
 
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+### 4. `pi --list-models` is cwd-dependent, cause unknown
 
-**This is the most valuable one, and it solves #4 and #7 outright.**
+**LOW. Documented in README "Sharp edges".**
 
-PAL's workflow tools make the model fill in a *required* schema:
+From one directory pi lists ~350 rows across 5 providers; from another, 17
+github-copilot rows. `pi_models` filters to the active provider, so callers are
+protected, but unexplained inconsistencies tend to matter later.
 
-```
-files_checked:   list of files examined during this step
-relevant_files:  FULL absolute paths to real files
-findings:        evidence and insights discovered
-confidence:      exploring | low | medium | high | almost_certain | certain
-```
+### 5. Pay-per-token providers are unreachable
 
-Because these are required schema fields, **a model cannot quietly answer from
-priors** — it has to declare what it looked at. Gemini's answer to our detector
-audit would have come back with `files_checked: []`, and the lie would have been
-*visible in the data* instead of hidden in plausible prose.
+**LOW. Deliberate. Revisit consciously, not by accident.**
 
-That is strictly better than my proposal in #4 (tool-use telemetry). Telemetry
-tells you what the harness observed; a required evidence schema makes the model
-commit, on the record, to what it claims to have done — and the two disagree loudly
-when it is bluffing.
+`PI_MCP_PROVIDER` allows `github-copilot` and `openai-codex` (both flat-rate).
+pi can also reach `anthropic`, `openai`, `azure-openai-responses` and
+`openrouter`, which would add Grok, DeepSeek, Qwen, GLM and Kimi. For model
+diversity, the whole reason this tool exists, openrouter would widen the spread
+well beyond GPT and Gemini. It is a billing decision, so it stays out of the
+tool until someone makes it.
 
-**Concrete:** give `pi_ask` a `require_evidence` mode that appends a structured-
-output contract to the prompt and validates the response has non-empty
-`files_checked`. Reject or flag answers that claim conclusions with no evidence.
+### 6. Delegate-side context budgeting
 
----
+**DEFERRED. Revisit only if delegates start blowing their context windows.**
 
-## 1. Process leak: every call spawns two MCP servers, and a killed call orphans them
+PAL (`utils/conversation_memory.py`, `utils/model_context.py`) collects history
+newest-first, drops the oldest turns when the budget is tight, dedups files
+across turns, and sizes the budget per model. Since continuations moved to pi's
+own `--session-id` files, pi does its own context management, so there is no
+observed pain yet. `openai-codex` models have a smaller window (272K), which
+makes this more likely to matter there first.
 
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+### 7. Reuse one pair of MCP servers across calls
 
-**HIGH — this is the one that bit hardest.**
+**DEFERRED. The leak is fixed; this would be the performance fix.**
 
-Every `pi_ask` spawns a fresh `fetch` (Python, via `uvx`) and `search` (Bun) MCP
-server. pi reaps them on a clean exit. It does **not** reap them if pi is killed.
-
-Observed: 33 orphaned `mcp-server-fetch` Python processes accumulated over an
-afternoon. Each new pi run then got slower, which caused more timeouts, which
-orphaned more processes. A death spiral — and every step of it looked like "pi is
-hanging" rather than "you have 33 zombies".
-
-Two aggravating factors:
-
-- **`timeout` is a trap.** Wrapping pi in `timeout N` to bound a slow call is
-  exactly what orphans the children. The cure caused the disease.
-- **Cleanup is dangerous.** `taskkill //F //IM python.exe` fixes it and also kills
-  every *other* Python MCP server the user has running (it took out `pal` and
-  `serena`). The safe form walks the process tree from the pi PIDs down.
-
-**Options, roughly in order of appeal:**
-
-- **Reuse one pair of MCP servers across calls.** This is the real fix, and it is
-  the argument for pi's RPC mode (`pi --mode rpc`) that the spec rejected: a
-  persistent session spawns the MCP servers **once** instead of per call. The spec
-  said to revisit "when we hit the wall of re-sending large context." We hit a
-  different wall first.
-- **Reap on our side.** Track the pi PID, and on failure/kill, walk its children and
-  kill them. Bounded, but it is cleanup rather than prevention.
-- **Ship a `pi_cleanup` tool** that finds and kills orphaned pi trees safely. A
-  band-aid, but a cheap one, and it beats the user discovering this via a hung
-  machine.
-
-**Do NOT re-introduce a naive `timeout`.** If a runtime bound is needed, it must
-kill the whole process tree, not just pi.
+Every `pi_ask` still spawns a fresh `fetch` (Python via `uvx`) and `search` (Bun)
+server. Reaping (see resolved R1) stops the orphans, but each call still pays the
+startup cost. pi's RPC mode (`pi --mode rpc`) would spawn them once per session.
+Worth it only if call latency becomes the complaint.
 
 ---
 
-## 2. No runtime bound at all
+## Resolved
 
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
+Implementation details for R1 to R5 are in
+`docs/superpowers/plans/2026-07-13-backlog-hardening.md`.
 
-**MEDIUM.**
+| # | Problem | Fix | Commit |
+|---|---------|-----|--------|
+| R1 | Killed calls orphaned MCP children (33 zombie `mcp-server-fetch` processes in one afternoon, a slowdown death spiral) | Kill the whole process tree; `pi_cleanup` tool and exit reaper scoped to our own PIDs | `4d41781`, `08d5202`, `aa8209f` |
+| R2 | No runtime bound, and a naive `timeout` caused R1 | Bounded runtime that kills the tree, not just pi | `4d41781` |
+| R3 | No multi-turn; RPC mode was assumed necessary | `continuation_id` via pi `--session-id`. The MCP server process is persistent even though MCP is stateless (PAL's insight) | `6cc82d1` |
+| R4 | Delegates silently answered from priors (Gemini: 443 confident, wrong words, never opened a file) | `require_evidence` contract: the delegate must declare files read and searches made; zero of both is flagged | `6a250a4` |
+| R5 | No guidance on which models do agentic work | `--thinking high` default; `pi_models` annotates measured reliability | `9b57f48`, `dbeba27` |
+| R6 | Multiline prompts truncated on Windows | Prompt delivered on stdin, not argv | `63c672a` |
+| R7 | Committed `pi-workspace/.mcp.json` held a machine-specific absolute path | Relative `../src/search-server.ts`, resolved against pi's pinned cwd; test forbids absolute paths | this change |
 
-`pi_ask` blocks until pi returns. A research call takes 5–15 minutes; a wedged one
-takes forever. There is currently no way to bound it, because the obvious way
-(`timeout`) causes finding #1.
+### Lessons worth keeping
 
-Needs to be solved *together* with #1: a bound that kills the process tree.
-
----
-
-## 3. The MCP server must be restarted to pick up code changes
-
-**DOCUMENTED in README "Sharp edges".**
-
-**MEDIUM — pure friction, but it wasted real time.**
-
-Claude Code spawns the pi-mcp server once at session start. Editing
-`src/run-pi.ts` or `src/pi-server.ts` does nothing until Claude Code restarts.
-
-This bit us twice in one session: the `--no-skills` fix and the `--thinking high`
-fix both had to be driven through Bash because the running MCP server still had
-the old code, and it is not obvious that this is what is happening — the tool just
-keeps behaving the old way.
-
-Options: document it loudly in the README; or have the server watch its own source
-and exit on change (Claude Code would respawn it).
-
----
-
-## 4. Model reliability varies enormously, and the tool says nothing about it
-
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
-
-**MEDIUM.**
-
-Measured on an identical multi-step research task (read 3 files, search the web,
-synthesize):
-
-| Model | At default (`medium`) thinking |
-|---|---|
-| **GPT-5.5** | Did the work. 2295 words, real `file:line` cites, fetched MS docs. |
-| **Gemini 3.1 Pro** | 443 words from priors. Never opened a file. **Confidently wrong.** |
-| **Fable 5** | "I can't locate the al-perf tool" — while holding three absolute paths. |
-
-`--thinking high` fixed Gemini and Fable. That is now the default (committed).
-
-But the tool still offers ~17 models with no guidance, and **the failure mode is
-silent**: a delegate that answers from priors produces confident, plausible,
-wrong prose that *looks exactly like* a real answer. Gemini's answer contained a
-flat factual error about al-perf (claimed it cannot produce exact invocation
-counts — the ir-json path does precisely that) and nothing in the output signalled
-that it had never read the code.
-
-**Options:**
-- Have `pi_models` annotate which models are known-good for agentic work.
-- Return tool-use telemetry with the answer ("this model made 0 tool calls") so a
-  prior-answer is *detectable* rather than plausible. This is the highest-value
-  version — it makes the failure mode visible instead of silent.
-
----
-
-## 5. `pi_models` is cwd-dependent and I do not know why
-
-**DOCUMENTED in README "Sharp edges".**
-
-**LOW, but it is an unexplained inconsistency and those tend to matter later.**
-
-`pi --list-models` returns ~350 rows (5 providers) when run from one directory and
-17 rows (github-copilot only) from another. The filter added in `9c577cb` protects
-the caller either way, but the underlying behavior is not understood.
-
----
-
-## 6. Only `github-copilot` is reachable
-
-**DOCUMENTED in README "Sharp edges".**
-
-**LOW — deliberate, but worth revisiting consciously.**
-
-`PROVIDER` is pinned. pi can also reach `anthropic`, `openai`,
-`azure-openai-responses`, and `openrouter` — which means **Grok 4.3, DeepSeek v4
-Pro, Qwen 3.7 Max, GLM 5.2, and Kimi** are all available to pi and invisible to
-`pi_ask`.
-
-That is a *billing* decision, not a technical one, which is why it is not a
-parameter. But for genuine model diversity — the entire reason this tool exists —
-openrouter would widen the family spread considerably beyond "GPT or Gemini".
-
----
-
-## 7. `pi_ask` cannot show its work
-
-**RESOLVED — see docs/superpowers/plans/2026-07-13-backlog-hardening.md**
-
-**LOW.**
-
-There is no way to see what the delegate did — which files it read, what it
-searched, how many tool calls it made. When Gemini returned prose from priors, the
-only way to detect it was for a human to notice the answer had no citations.
-
-Related to #4's telemetry idea, and probably the same fix.
+- **Do not re-introduce a naive `timeout`.** Any runtime bound must kill the
+  whole process tree.
+- **Never clean up with `taskkill //F //IM python.exe`.** It kills every other
+  Python MCP server too (it took out `pal` and `serena`).
+- **pi's `--tools` allowlist fails open.** Unknown names are ignored, so only the
+  live probe in `test/leash.test.ts` proves the boundary.
+- **A prior-derived answer looks exactly like a real one.** Make the failure
+  visible in the data, not in a human's judgment.
