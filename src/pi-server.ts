@@ -1,12 +1,53 @@
 #!/usr/bin/env bun
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { mkdirSync, writeFileSync } from "fs";
-import { dirname, resolve } from "path";
+import { mkdirSync, readdirSync, statSync, writeFileSync } from "fs";
+import { dirname, join, resolve } from "path";
 import { z } from "zod";
 import { type PiResult, PROVIDER, runPi, type ThinkingLevel, killTree, livePiPids } from "./run-pi.js";
 
 const PREVIEW_CHARS = 400;
+
+/** mtime of every .ts file in `dir`. Exported for testing. */
+export function snapshotSources(dir: string): Map<string, number> {
+	const snap = new Map<string, number>();
+	for (const f of readdirSync(dir)) {
+		if (f.endsWith(".ts")) snap.set(f, statSync(join(dir, f)).mtimeMs);
+	}
+	return snap;
+}
+
+/** Files added, removed, or modified since `snap`. Exported for testing. */
+export function changedSources(dir: string, snap: Map<string, number>): string[] {
+	const now = snapshotSources(dir);
+	const names = new Set([...snap.keys(), ...now.keys()]);
+	return [...names].filter((f) => snap.get(f) !== now.get(f)).sort();
+}
+
+/**
+ * Claude Code spawns this server once per session and never respawns a stdio
+ * server on its own, so exiting on change would just break the tool. Instead,
+ * say so: edits to src/ otherwise do nothing, with no hint that the old code is
+ * still answering. (search-server.ts is spawned per pi call and is always fresh,
+ * but a warning for it too is harmless and keeps the rule simple.)
+ */
+const STARTUP_SOURCES = snapshotSources(import.meta.dir);
+
+function staleNotice(): string | undefined {
+	const changed = changedSources(import.meta.dir, STARTUP_SOURCES);
+	if (changed.length === 0) return undefined;
+	return `[pi-mcp WARNING: ${changed.join(", ")} changed since this server started. This answer came from the OLD code. Run /mcp reconnect pi (or restart Claude Code) to load the new code.]`;
+}
+
+type TextResult = { content: { type: "text"; text: string }[] };
+
+function warnIfStale<A extends unknown[]>(h: (...a: A) => Promise<TextResult>) {
+	return async (...a: A): Promise<TextResult> => {
+		const r = await h(...a);
+		const notice = staleNotice();
+		return notice ? { content: [{ type: "text", text: notice }, ...r.content] } : r;
+	};
+}
 
 /**
  * Kill every in-flight pi tree WE spawned. Deliberately scoped to our own
@@ -184,7 +225,7 @@ export function createPiMcpServer(): McpServer {
 					),
 			},
 		},
-		async ({ model, prompt, output_file, thinking, continuation_id, require_evidence }) => {
+		warnIfStale(async ({ model, prompt, output_file, thinking, continuation_id, require_evidence }) => {
 			const sessionId = continuation_id ?? crypto.randomUUID();
 			const wantEvidence = require_evidence !== false;
 			const fullPrompt = wantEvidence ? prompt + EVIDENCE_CONTRACT : prompt;
@@ -204,7 +245,7 @@ export function createPiMcpServer(): McpServer {
 			return {
 				content: [{ type: "text" as const, text: `${verdict}\n\n${formatted}` }],
 			};
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -215,7 +256,7 @@ export function createPiMcpServer(): McpServer {
 				"Kill every pi delegate this server currently has in flight, including their MCP-server children (the fetch/search processes pi spawns per run). Use when a pi_ask seems wedged. Safe: only touches process trees this server created — never other Python or Bun processes on the machine.",
 			inputSchema: {},
 		},
-		async () => {
+		warnIfStale(async () => {
 			const n = await cleanupLivePi();
 			return {
 				content: [
@@ -225,7 +266,7 @@ export function createPiMcpServer(): McpServer {
 					},
 				],
 			};
-		},
+		}),
 	);
 
 	server.registerTool(
@@ -243,7 +284,7 @@ export function createPiMcpServer(): McpServer {
 					),
 			},
 		},
-		async ({ all }) => {
+		warnIfStale(async ({ all }) => {
 			try {
 				const proc = Bun.spawn(["pi", "--list-models"], {
 					stdout: "pipe",
@@ -288,7 +329,7 @@ export function createPiMcpServer(): McpServer {
 					],
 				};
 			}
-		},
+		}),
 	);
 
 	return server;

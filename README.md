@@ -91,7 +91,7 @@ pi_ask({
 })
 ```
 
-Restart Claude Code (or `/mcp` reconnect) after any change to `src/`. The server is spawned once per session.
+Run `/mcp reconnect pi` (or restart Claude Code) after any change to `src/`. Until then, tool results carry a warning that old code answered.
 
 ## Configuration
 
@@ -174,7 +174,7 @@ not mitigated**. Point this at code you would be relaxed about open-sourcing.
 
 | Edge | Detail |
 |------|--------|
-| Code changes need a restart | Claude Code spawns the server once. Edits to `src/` do nothing to a running session, with no error. |
+| Code changes need a reconnect | Claude Code spawns the server once and does not respawn it. After edits to `src/`, every tool result starts with a warning until you run `/mcp reconnect pi` or restart Claude Code. |
 | `pi --list-models` depends on cwd | Some directories list ~350 models, others 17 github-copilot rows. `pi_models` filters to the active provider regardless. |
 | Wedged call | Use `pi_cleanup`, never `taskkill //F //IM python.exe`. The blunt version kills every other Python MCP server too. |
 

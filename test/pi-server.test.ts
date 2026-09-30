@@ -1,9 +1,26 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtempSync, readFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { formatAskResult, cleanupLivePi, EVIDENCE_CONTRACT, evidenceVerdict, extractEvidence, annotateModels, MODEL_NOTES } from "../src/pi-server.js";
+import { formatAskResult, cleanupLivePi, EVIDENCE_CONTRACT, evidenceVerdict, extractEvidence, annotateModels, MODEL_NOTES, snapshotSources, changedSources } from "../src/pi-server.js";
 import { livePiPids } from "../src/run-pi.js";
+
+describe("stale-code detection — edits to src/ must not go unnoticed", () => {
+	it("reports modified, added, and removed .ts files, and ignores the rest", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pi-mcp-src-"));
+		writeFileSync(join(dir, "a.ts"), "a");
+		writeFileSync(join(dir, "b.ts"), "b");
+		writeFileSync(join(dir, "notes.md"), "x");
+		const snap = snapshotSources(dir);
+		expect(changedSources(dir, snap)).toEqual([]);
+
+		utimesSync(join(dir, "a.ts"), new Date(), new Date(Date.now() + 5000));
+		rmSync(join(dir, "b.ts"));
+		writeFileSync(join(dir, "c.ts"), "c");
+		writeFileSync(join(dir, "notes.md"), "changed");
+		expect(changedSources(dir, snap)).toEqual(["a.ts", "b.ts", "c.ts"]);
+	});
+});
 
 describe("formatAskResult carries the continuation_id", () => {
 	it("appends the id on success so the caller can continue the thread", () => {
