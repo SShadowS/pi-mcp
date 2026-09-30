@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, SESSIONS_DIR, runPi, resolveProvider } from "../src/run-pi.js";
+import { DEFAULT_TIMEOUT_MS, killTree, livePiPids, buildPiArgs, PI_WORKSPACE, SESSIONS_DIR, runPi, resolveProvider, PROVIDER } from "../src/run-pi.js";
 
 describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 	// pi discovers MCP servers ONLY from the .mcp.json in its working directory,
@@ -46,12 +46,20 @@ describe("resolveProvider — PI_MCP_PROVIDER picks the subscription", () => {
 });
 
 describe("buildPiArgs", () => {
-	it("always passes --provider github-copilot", () => {
+	it("always passes --provider", () => {
 		// Without this, pi falls back to an unauthenticated provider and prints a
 		// login prompt instead of an answer. Verified against the real binary.
+		// Provider is passed explicitly: the default comes from PI_MCP_PROVIDER,
+		// and Bun auto-loads .env, so asserting the default would test the machine.
+		for (const provider of ["github-copilot", "openai-codex"] as const) {
+			const args = buildPiArgs("gpt-5.5", undefined, undefined, provider);
+			expect(args[args.indexOf("--provider") + 1]).toBe(provider);
+		}
+	});
+
+	it("defaults --provider to PROVIDER", () => {
 		const args = buildPiArgs("gpt-5.5");
-		expect(args).toContain("--provider");
-		expect(args[args.indexOf("--provider") + 1]).toBe("github-copilot");
+		expect(args[args.indexOf("--provider") + 1]).toBe(PROVIDER);
 	});
 
 	it("leashes pi to read,mcp — never bash, write, or edit", () => {
@@ -161,7 +169,9 @@ describe("prompt delivery (integration — hits the real API)", () => {
 				"Line 2 is filler to prove multiline delivery.",
 				"Line 3: reply with ONLY the marker STDIN-INTACT-31. Nothing else.",
 			].join("\n");
-			const res = await runPi("gpt-5-mini", prompt, "off");
+			// gpt-5-mini is Copilot-only; gpt-5.5 exists on every allowed provider.
+			const model = PROVIDER === "github-copilot" ? "gpt-5-mini" : "gpt-5.5";
+			const res = await runPi(model, prompt, "off");
 			expect(res.ok).toBe(true);
 			if (res.ok) expect(res.text).toContain("STDIN-INTACT-31");
 		},

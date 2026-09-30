@@ -127,6 +127,7 @@ export function buildPiArgs(
 	model: string,
 	thinking: ThinkingLevel = DEFAULT_THINKING,
 	sessionId?: string,
+	provider: Provider = PROVIDER,
 ): string[] {
 	// MCP is stateless; this server — and pi's session files — are not. A
 	// sessionId turns the call into a resumable thread: pi persists the turns
@@ -159,7 +160,7 @@ export function buildPiArgs(
 		"--no-prompt-templates",
 		"--no-context-files",
 		"--provider",
-		PROVIDER,
+		provider,
 		"--model",
 		model,
 		"--tools",

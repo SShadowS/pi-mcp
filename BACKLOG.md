@@ -26,23 +26,7 @@ reading its answer.
   reverses the current "no cross-provider retry" rule in `search-server.ts`, so
   decide it deliberately; a credit error is not a transient HTTP failure.
 
-### 2. Tests depend on the local `.env`
-
-**MEDIUM. Two tests fail on a machine whose `.env` sets `PI_MCP_PROVIDER`.**
-
-`PROVIDER` in `src/run-pi.ts` is resolved from `process.env` at module load, and
-Bun auto-loads `.env` from the cwd. With `PI_MCP_PROVIDER=openai-codex`:
-
-- `buildPiArgs > always passes --provider github-copilot` fails. It asserts the
-  default, but the default is whatever the environment says.
-- `prompt delivery > a multiline prompt ... arrives INTACT` fails, probably
-  because it uses a Copilot model id against the codex provider.
-
-Fix: let `buildPiArgs` take the provider as a parameter (default `PROVIDER`) and
-assert explicitly in the unit test; make the integration tests pick a model id
-that matches `PROVIDER`, or skip them when it is not `github-copilot`.
-
-### 3. Code changes need a Claude Code restart
+### 2. Code changes need a Claude Code restart
 
 **LOW. Documented in README "Sharp edges". Friction, not breakage.**
 
@@ -53,7 +37,7 @@ hint. This cost real time twice (the `--no-skills` and `--thinking high` fixes).
 Option if it keeps biting: have the server watch its own source and exit on
 change, so Claude Code respawns it.
 
-### 4. `pi --list-models` is cwd-dependent, cause unknown
+### 3. `pi --list-models` is cwd-dependent, cause unknown
 
 **LOW. Documented in README "Sharp edges".**
 
@@ -61,7 +45,7 @@ From one directory pi lists ~350 rows across 5 providers; from another, 17
 github-copilot rows. `pi_models` filters to the active provider, so callers are
 protected, but unexplained inconsistencies tend to matter later.
 
-### 5. Pay-per-token providers are unreachable
+### 4. Pay-per-token providers are unreachable
 
 **LOW. Deliberate. Revisit consciously, not by accident.**
 
@@ -72,7 +56,7 @@ diversity, the whole reason this tool exists, openrouter would widen the spread
 well beyond GPT and Gemini. It is a billing decision, so it stays out of the
 tool until someone makes it.
 
-### 6. Delegate-side context budgeting
+### 5. Delegate-side context budgeting
 
 **DEFERRED. Revisit only if delegates start blowing their context windows.**
 
@@ -83,7 +67,7 @@ own `--session-id` files, pi does its own context management, so there is no
 observed pain yet. `openai-codex` models have a smaller window (272K), which
 makes this more likely to matter there first.
 
-### 7. Reuse one pair of MCP servers across calls
+### 6. Reuse one pair of MCP servers across calls
 
 **DEFERRED. The leak is fixed; this would be the performance fix.**
 
@@ -107,7 +91,8 @@ Implementation details for R1 to R5 are in
 | R4 | Delegates silently answered from priors (Gemini: 443 confident, wrong words, never opened a file) | `require_evidence` contract: the delegate must declare files read and searches made; zero of both is flagged | `6a250a4` |
 | R5 | No guidance on which models do agentic work | `--thinking high` default; `pi_models` annotates measured reliability | `9b57f48`, `dbeba27` |
 | R6 | Multiline prompts truncated on Windows | Prompt delivered on stdin, not argv | `63c672a` |
-| R7 | Committed `pi-workspace/.mcp.json` held a machine-specific absolute path | Relative `../src/search-server.ts`, resolved against pi's pinned cwd; test forbids absolute paths | this change |
+| R7 | Committed `pi-workspace/.mcp.json` held a machine-specific absolute path | Relative `../src/search-server.ts`, resolved against pi's pinned cwd; test forbids absolute paths | `42e41e2` |
+| R8 | Two tests failed when `.env` set `PI_MCP_PROVIDER=openai-codex` (Bun auto-loads `.env`; `PROVIDER` resolves at module load) | `buildPiArgs` takes the provider as a parameter; unit test asserts it explicitly; integration test picks a model that exists on the active provider | this change |
 
 ### Lessons worth keeping
 
