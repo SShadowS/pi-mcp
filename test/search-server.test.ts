@@ -5,7 +5,8 @@ import {
 	formatSerperResults,
 	formatSerpResults,
 	httpErrorText,
-	resolveSearchProvider,
+	resolveSearchProviders,
+	runSearch,
 } from "../src/search-server.js";
 
 describe("httpErrorText — a status code alone tells the delegate nothing", () => {
@@ -63,7 +64,7 @@ describe("the key never reaches git", () => {
 	});
 });
 
-describe("resolveSearchProvider — Serper preferred, SerpAPI fallback", () => {
+describe("resolveSearchProviders — Serper first, SerpAPI second", () => {
 	// Save/restore the real env so these tests never leak state (or a real key)
 	// into each other.
 	const saved = {
@@ -77,37 +78,60 @@ describe("resolveSearchProvider — Serper preferred, SerpAPI fallback", () => {
 		else process.env.SERPAPI_API_KEY = saved.serpapi;
 	});
 
-	it("picks serper when both keys are present", () => {
+	it("lists serper first, then serpapi, when both keys are present", () => {
 		process.env.SERPER_API_KEY = "serper-key";
 		process.env.SERPAPI_API_KEY = "serpapi-key";
-		expect(resolveSearchProvider()).toEqual({
-			provider: "serper",
-			key: "serper-key",
-		});
+		expect(resolveSearchProviders()).toEqual([
+			{ provider: "serper", key: "serper-key" },
+			{ provider: "serpapi", key: "serpapi-key" },
+		]);
 	});
 
-	it("falls back to serpapi when only that key is present", () => {
+	it("lists serpapi last when only that key is in the environment", () => {
 		delete process.env.SERPER_API_KEY;
 		process.env.SERPAPI_API_KEY = "serpapi-key";
-		// NOTE: a SERPER_API_KEY in the repo's .env would still win here — that is
-		// correct behavior (env-or-.env, serper preferred), so only assert when the
-		// .env fallback does not interfere.
-		const got = resolveSearchProvider();
-		if (got?.provider === "serpapi") {
-			expect(got.key).toBe("serpapi-key");
-		} else {
-			expect(got?.provider).toBe("serper"); // .env had a serper key
-		}
+		// A SERPER_API_KEY in the repo's .env may still come first on this machine
+		// (env-or-.env, serper preferred); serpapi must be last either way.
+		expect(resolveSearchProviders().at(-1)).toEqual({ provider: "serpapi", key: "serpapi-key" });
+	});
+});
+
+describe("runSearch — fall through providers, never silently", () => {
+	const serper = { provider: "serper", key: "s" } as const;
+	const serpapi = { provider: "serpapi", key: "p" } as const;
+
+	it("returns the first provider's results with no note when it succeeds", async () => {
+		const calls: string[] = [];
+		const out = await runSearch([serper, serpapi], "q", undefined, async (p) => {
+			calls.push(p.provider);
+			return { ok: true, text: `results from ${p.provider}` };
+		});
+		expect(out).toBe("results from serper");
+		expect(calls).toEqual(["serper"]);
 	});
 
-	it("returns undefined when no key exists anywhere", () => {
-		delete process.env.SERPER_API_KEY;
-		delete process.env.SERPAPI_API_KEY;
-		const got = resolveSearchProvider();
-		// Only assert absence if the repo .env doesn't supply a key on this machine.
-		if (got !== undefined) {
-			expect(["serper", "serpapi"]).toContain(got.provider);
-		}
+	it("falls back to SerpAPI and names why Serper failed", async () => {
+		const out = await runSearch([serper, serpapi], "q", undefined, async (p) =>
+			p.provider === "serper"
+				? { ok: false, error: "Serper returned HTTP 400: Not enough credits" }
+				: { ok: true, text: "results from serpapi" },
+		);
+		expect(out).toContain("Fell back to SerpAPI");
+		expect(out).toContain("Not enough credits");
+		expect(out).toEndWith("results from serpapi");
+	});
+
+	it("reports every provider's error when all fail", async () => {
+		const out = await runSearch([serper, serpapi], "q", undefined, async (p) => ({
+			ok: false,
+			error: `${p.provider} broke`,
+		}));
+		expect(out).toContain("serper broke");
+		expect(out).toContain("serpapi broke");
+	});
+
+	it("says no key is set when there are no providers", async () => {
+		expect(await runSearch([], "q")).toContain("No search API key is set");
 	});
 });
 

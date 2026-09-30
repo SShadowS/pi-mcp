@@ -61,17 +61,18 @@ function resolveKey(name: string): string | undefined {
 export type SearchProvider = { provider: "serper" | "serpapi"; key: string };
 
 /**
- * Serper preferred (cheaper, faster), SerpAPI fallback. Picked at call time by
- * key presence only — deliberately no cross-provider retry on HTTP errors
- * (YAGNI; an error surfaces as an error, not as a silent provider switch).
- * Exported for testing.
+ * Every provider with a key, in preference order: Serper (cheaper, faster)
+ * first, SerpAPI second. Resolved at call time. runSearch falls through the
+ * list on failure — Serper out of credits should not take search down when a
+ * working SerpAPI key is sitting right there. Exported for testing.
  */
-export function resolveSearchProvider(): SearchProvider | undefined {
+export function resolveSearchProviders(): SearchProvider[] {
+	const out: SearchProvider[] = [];
 	const serper = resolveKey("SERPER_API_KEY");
-	if (serper) return { provider: "serper", key: serper };
+	if (serper) out.push({ provider: "serper", key: serper });
 	const serpapi = resolveKey("SERPAPI_API_KEY");
-	if (serpapi) return { provider: "serpapi", key: serpapi };
-	return undefined;
+	if (serpapi) out.push({ provider: "serpapi", key: serpapi });
+	return out;
 }
 
 interface SerpOrganicResult {
@@ -135,6 +136,69 @@ export function httpErrorText(
 		: `${provider} returned HTTP ${status}.`;
 }
 
+export type SearchOutcome = { ok: true; text: string } | { ok: false; error: string };
+
+const LABEL = { serper: "Serper", serpapi: "SerpAPI" } as const;
+
+/** One provider, one call. Never throws: network errors become outcomes. */
+export async function searchOne(
+	p: SearchProvider,
+	query: string,
+	num?: number,
+): Promise<SearchOutcome> {
+	try {
+		if (p.provider === "serper") {
+			// Serper.dev: POST with the key in a header — never in the URL.
+			const res = await fetch("https://google.serper.dev/search", {
+				method: "POST",
+				headers: { "X-API-KEY": p.key, "Content-Type": "application/json" },
+				body: JSON.stringify({ q: query, num: num ?? 10 }),
+			});
+			if (!res.ok) return { ok: false, error: httpErrorText("Serper", res.status, await res.text(), p.key) };
+			return { ok: true, text: formatSerperResults((await res.json()) as { organic?: SerpOrganicResult[] }) };
+		}
+		const url = new URL("https://serpapi.com/search.json");
+		url.searchParams.set("engine", "google");
+		url.searchParams.set("q", query);
+		url.searchParams.set("num", String(num ?? 10));
+		url.searchParams.set("api_key", p.key);
+		const res = await fetch(url);
+		if (!res.ok) return { ok: false, error: httpErrorText("SerpAPI", res.status, await res.text(), p.key) };
+		return { ok: true, text: formatSerpResults((await res.json()) as { organic_results?: SerpOrganicResult[] }) };
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		return { ok: false, error: `${LABEL[p.provider]} failed: ${msg.split(p.key).join("[redacted]")}` };
+	}
+}
+
+/**
+ * Try each provider in preference order; first success wins. A fallback is
+ * never silent: the result names the provider that failed and why, so the
+ * delegate and the human reading its answer can see the switch happened.
+ * `doSearch` is injectable so the fallback logic is testable without network.
+ */
+export async function runSearch(
+	providers: SearchProvider[],
+	query: string,
+	num?: number,
+	doSearch: typeof searchOne = searchOne,
+): Promise<string> {
+	if (providers.length === 0) {
+		return "No search API key is set. Put SERPER_API_KEY (preferred) or SERPAPI_API_KEY in the environment, or in a .env file at the pi-mcp repo root (gitignored). Web search is unavailable until then.";
+	}
+	const errors: string[] = [];
+	for (const p of providers) {
+		const out = await doSearch(p, query, num);
+		if (out.ok) {
+			return errors.length === 0
+				? out.text
+				: `[Fell back to ${LABEL[p.provider]}. ${errors.join(" ")}]\n\n${out.text}`;
+		}
+		errors.push(out.error);
+	}
+	return `Search failed on every provider.\n${errors.join("\n")}`;
+}
+
 export function createSearchMcpServer(): McpServer {
 	const server = new McpServer({ name: "web-search", version: "0.2.0" });
 
@@ -153,74 +217,8 @@ export function createSearchMcpServer(): McpServer {
 			},
 		},
 		async ({ query, num }) => {
-			const picked = resolveSearchProvider();
-			if (!picked) {
-				return {
-					content: [
-						{
-							type: "text" as const,
-							text: "No search API key is set. Put SERPER_API_KEY (preferred) or SERPAPI_API_KEY in the environment, or in a .env file at the pi-mcp repo root (gitignored). Web search is unavailable until then.",
-						},
-					],
-				};
-			}
-
-			try {
-				let text: string;
-				if (picked.provider === "serper") {
-					// Serper.dev: POST with the key in a header — never in the URL.
-					const res = await fetch("https://google.serper.dev/search", {
-						method: "POST",
-						headers: {
-							"X-API-KEY": picked.key,
-							"Content-Type": "application/json",
-						},
-						body: JSON.stringify({ q: query, num: num ?? 10 }),
-					});
-					if (!res.ok) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: httpErrorText("Serper", res.status, await res.text(), picked.key),
-								},
-							],
-						};
-					}
-					const json = (await res.json()) as {
-						organic?: SerpOrganicResult[];
-					};
-					text = formatSerperResults(json);
-				} else {
-					const url = new URL("https://serpapi.com/search.json");
-					url.searchParams.set("engine", "google");
-					url.searchParams.set("q", query);
-					url.searchParams.set("num", String(num ?? 10));
-					url.searchParams.set("api_key", picked.key);
-
-					const res = await fetch(url);
-					if (!res.ok) {
-						return {
-							content: [
-								{
-									type: "text" as const,
-									text: httpErrorText("SerpAPI", res.status, await res.text(), picked.key),
-								},
-							],
-						};
-					}
-					const json = (await res.json()) as {
-						organic_results?: SerpOrganicResult[];
-					};
-					text = formatSerpResults(json);
-				}
-				return { content: [{ type: "text" as const, text }] };
-			} catch (err) {
-				const msg = err instanceof Error ? err.message : String(err);
-				return {
-					content: [{ type: "text" as const, text: `Search failed: ${msg}` }],
-				};
-			}
+			const text = await runSearch(resolveSearchProviders(), query, num);
+			return { content: [{ type: "text" as const, text }] };
 		},
 	);
 

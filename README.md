@@ -36,7 +36,7 @@ will not.
 | **Evidence contract** | By default the delegate must declare which files it read and which searches it ran. Answers with zero of both are flagged as prior-derived. |
 | **Continuations** | Each answer ends with `[continuation_id: ...]`. Pass it back to continue the thread with prior turns intact. |
 | **Probed leash** | `test/leash.test.ts` asks pi to run `bash` and `write` against the real API and asserts both fail. |
-| **Web search** | Bundled search MCP server using Serper.dev (preferred) or SerpAPI (fallback). |
+| **Web search** | Bundled search MCP server using Serper.dev (preferred) or SerpAPI. If Serper fails and a SerpAPI key is set, search falls back and says so in the result. |
 
 ### `pi_ask` parameters
 
@@ -99,7 +99,7 @@ Restart Claude Code (or `/mcp` reconnect) after any change to `src/`. The server
 |----------|---------|-------------|
 | `PI_MCP_PROVIDER` | `github-copilot` | Subscription provider: `github-copilot` or `openai-codex`. Pay-per-token providers are refused at startup. |
 | `SERPER_API_KEY` | none | [Serper.dev](https://serper.dev) key. Preferred search provider. |
-| `SERPAPI_API_KEY` | none | [SerpAPI](https://serpapi.com) key. Used only when no Serper key is set. |
+| `SERPAPI_API_KEY` | none | [SerpAPI](https://serpapi.com) key. Used when no Serper key is set, or when Serper fails (for example, out of credits). |
 
 Keys are read from the environment, or from a gitignored `.env` at the repo root (copy `.env.example`). They are never stored in the repo. Without a key, `fetch` still works and `search` reports plainly that it is unavailable.
 

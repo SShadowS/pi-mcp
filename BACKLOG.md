@@ -11,17 +11,7 @@ kept at the bottom as a short record of what was learned.
 
 ## Open
 
-### 1. Fall back to SerpAPI when Serper is out of credits?
-
-**LOW. A decision, not a bug.**
-
-Serper answers exhausted credits with HTTP 400 `Not enough credits`, and search
-stays down until someone tops up, even when a SerpAPI key is set. The error text
-now says so plainly (R9). Falling back automatically would reverse the "no
-cross-provider retry" rule in `search-server.ts`, so decide it deliberately. If
-done, fall back only on the credit error, not on every HTTP failure.
-
-### 2. Code changes need a Claude Code restart
+### 1. Code changes need a Claude Code restart
 
 **LOW. Documented in README "Sharp edges". Friction, not breakage.**
 
@@ -32,7 +22,7 @@ hint. This cost real time twice (the `--no-skills` and `--thinking high` fixes).
 Option if it keeps biting: have the server watch its own source and exit on
 change, so Claude Code respawns it.
 
-### 3. `pi --list-models` is cwd-dependent, cause unknown
+### 2. `pi --list-models` is cwd-dependent, cause unknown
 
 **LOW. Documented in README "Sharp edges".**
 
@@ -40,7 +30,7 @@ From one directory pi lists ~350 rows across 5 providers; from another, 17
 github-copilot rows. `pi_models` filters to the active provider, so callers are
 protected, but unexplained inconsistencies tend to matter later.
 
-### 4. Pay-per-token providers are unreachable
+### 3. Pay-per-token providers are unreachable
 
 **LOW. Deliberate. Revisit consciously, not by accident.**
 
@@ -51,7 +41,7 @@ diversity, the whole reason this tool exists, openrouter would widen the spread
 well beyond GPT and Gemini. It is a billing decision, so it stays out of the
 tool until someone makes it.
 
-### 5. Delegate-side context budgeting
+### 4. Delegate-side context budgeting
 
 **DEFERRED. Revisit only if delegates start blowing their context windows.**
 
@@ -62,7 +52,7 @@ own `--session-id` files, pi does its own context management, so there is no
 observed pain yet. `openai-codex` models have a smaller window (272K), which
 makes this more likely to matter there first.
 
-### 6. Reuse one pair of MCP servers across calls
+### 5. Reuse one pair of MCP servers across calls
 
 **DEFERRED. The leak is fixed; this would be the performance fix.**
 
@@ -88,7 +78,8 @@ Implementation details for R1 to R5 are in
 | R6 | Multiline prompts truncated on Windows | Prompt delivered on stdin, not argv | `63c672a` |
 | R7 | Committed `pi-workspace/.mcp.json` held a machine-specific absolute path | Relative `../src/search-server.ts`, resolved against pi's pinned cwd; test forbids absolute paths | `42e41e2` |
 | R8 | Two tests failed when `.env` set `PI_MCP_PROVIDER=openai-codex` (Bun auto-loads `.env`; `PROVIDER` resolves at module load) | `buildPiArgs` takes the provider as a parameter; unit test asserts it explicitly; integration test picks a model that exists on the active provider | `74681e7` |
-| R9 | Search errors were a bare `Serper returned HTTP 400.`; the cause (`Not enough credits`) took a manual probe to find | Tool result carries the provider's `message` / `error`, key redacted, capped at 300 chars | this change |
+| R9 | Search errors were a bare `Serper returned HTTP 400.`; the cause (`Not enough credits`) took a manual probe to find | Tool result carries the provider's `message` / `error`, key redacted, capped at 300 chars | `fb5c644` |
+| R10 | Serper out of credits took search down even with a working SerpAPI key | `runSearch` tries each keyed provider in order; a fallback is announced in the result with the failed provider's error, never silent | this change |
 
 ### Lessons worth keeping
 
