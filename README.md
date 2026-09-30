@@ -70,15 +70,13 @@ costs a few hundred.
    bun install
    ```
 
-2. Edit `pi-workspace/.mcp.json` so the `search` server points at your clone's `src/search-server.ts` (absolute path).
-
-3. Register with Claude Code:
+2. Register with Claude Code:
 
    ```bash
    claude mcp add pi -s user -- bun run <path-to>/pi-mcp/src/pi-server.ts
    ```
 
-4. Set a search API key (see Configuration). Restart your terminal so child processes inherit it.
+3. Set a search API key (see Configuration). Restart your terminal so child processes inherit it.
 
 ## Usage
 

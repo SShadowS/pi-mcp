@@ -6,7 +6,7 @@
     },
     "search": {
       "command": "bun",
-      "args": ["run", "U:/Git/pi-mcp/src/search-server.ts"]
+      "args": ["run", "../src/search-server.ts"]
     }
   }
 }

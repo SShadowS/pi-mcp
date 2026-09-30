@@ -17,6 +17,17 @@ describe("PI_WORKSPACE — the cwd IS the MCP config", () => {
 		expect(Object.keys(cfg.mcpServers)).toContain("fetch");
 		expect(Object.keys(cfg.mcpServers)).toContain("search");
 	});
+
+	// The file is committed, so an absolute path only works on one machine.
+	// Relative paths resolve against pi's cwd, which runPi pins to the workspace.
+	it("the workspace .mcp.json uses no absolute paths", () => {
+		const cfg = JSON.parse(readFileSync(join(PI_WORKSPACE, ".mcp.json"), "utf8"));
+		for (const server of Object.values(cfg.mcpServers) as { args?: string[] }[]) {
+			for (const arg of server.args ?? []) {
+				expect(arg).not.toMatch(/^([A-Za-z]:[\\/]|\/)/);
+			}
+		}
+	});
 });
 
 describe("resolveProvider — PI_MCP_PROVIDER picks the subscription", () => {
