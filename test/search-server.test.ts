@@ -4,8 +4,33 @@ import { join } from "path";
 import {
 	formatSerperResults,
 	formatSerpResults,
+	httpErrorText,
 	resolveSearchProvider,
 } from "../src/search-server.js";
+
+describe("httpErrorText — a status code alone tells the delegate nothing", () => {
+	it("carries Serper's message", () => {
+		expect(httpErrorText("Serper", 400, '{"message":"Not enough credits","statusCode":400}', "k-123")).toBe(
+			"Serper returned HTTP 400: Not enough credits",
+		);
+	});
+	it("carries SerpAPI's error", () => {
+		expect(httpErrorText("SerpAPI", 401, '{"error":"Invalid API key."}', "k-123")).toBe(
+			"SerpAPI returned HTTP 401: Invalid API key.",
+		);
+	});
+	it("falls back to the raw body when it is not JSON", () => {
+		expect(httpErrorText("Serper", 502, "Bad Gateway", "k-123")).toBe("Serper returned HTTP 502: Bad Gateway");
+	});
+	it("says only the status when the body is empty", () => {
+		expect(httpErrorText("Serper", 500, "", "k-123")).toBe("Serper returned HTTP 500.");
+	});
+	it("redacts the key if a provider echoes it", () => {
+		const out = httpErrorText("SerpAPI", 401, '{"error":"Invalid key k-123"}', "k-123");
+		expect(out).not.toContain("k-123");
+		expect(out).toContain("[redacted]");
+	});
+});
 
 // No key in this file, and none needed: the mapper is pure.
 

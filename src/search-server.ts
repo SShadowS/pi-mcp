@@ -108,6 +108,33 @@ export function formatSerperResults(json: {
 	return formatResults(json.organic ?? []);
 }
 
+/**
+ * Error text for a failed search call. Carries the provider's own message
+ * (Serper: `message`, SerpAPI: `error`) because a bare status code tells the
+ * delegate nothing: Serper answers "Not enough credits" with a plain 400.
+ * The key is redacted in case a provider ever echoes it back.
+ * Exported for testing. Pure — no network.
+ */
+export function httpErrorText(
+	provider: "Serper" | "SerpAPI",
+	status: number,
+	body: string,
+	key: string,
+): string {
+	let detail = body.trim();
+	try {
+		const json = JSON.parse(detail) as { message?: unknown; error?: unknown };
+		const msg = json.message ?? json.error;
+		if (typeof msg === "string") detail = msg;
+	} catch {
+		// Not JSON: keep the raw body.
+	}
+	detail = detail.split(key).join("[redacted]").slice(0, 300);
+	return detail
+		? `${provider} returned HTTP ${status}: ${detail}`
+		: `${provider} returned HTTP ${status}.`;
+}
+
 export function createSearchMcpServer(): McpServer {
 	const server = new McpServer({ name: "web-search", version: "0.2.0" });
 
@@ -155,7 +182,7 @@ export function createSearchMcpServer(): McpServer {
 							content: [
 								{
 									type: "text" as const,
-									text: `Serper returned HTTP ${res.status}.`,
+									text: httpErrorText("Serper", res.status, await res.text(), picked.key),
 								},
 							],
 						};
@@ -177,7 +204,7 @@ export function createSearchMcpServer(): McpServer {
 							content: [
 								{
 									type: "text" as const,
-									text: `SerpAPI returned HTTP ${res.status}.`,
+									text: httpErrorText("SerpAPI", res.status, await res.text(), picked.key),
 								},
 							],
 						};

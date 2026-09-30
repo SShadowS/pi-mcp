@@ -11,20 +11,15 @@ kept at the bottom as a short record of what was learned.
 
 ## Open
 
-### 1. Search errors hide their cause
+### 1. Fall back to SerpAPI when Serper is out of credits?
 
-**MEDIUM. Hit on 2026-09-30.**
+**LOW. A decision, not a bug.**
 
-Serper returned HTTP 400 and the delegate saw only `Serper returned HTTP 400.`
-The body said `{"message":"Not enough credits"}`, which took a manual probe to
-find. A delegate cannot act on a bare status code, and neither can the human
-reading its answer.
-
-- Include Serper's `message` (and SerpAPI's `error`) in the tool result. Never
-  echo request headers, since those carry the key.
-- Consider falling back to SerpAPI when Serper reports exhausted credits. This
-  reverses the current "no cross-provider retry" rule in `search-server.ts`, so
-  decide it deliberately; a credit error is not a transient HTTP failure.
+Serper answers exhausted credits with HTTP 400 `Not enough credits`, and search
+stays down until someone tops up, even when a SerpAPI key is set. The error text
+now says so plainly (R9). Falling back automatically would reverse the "no
+cross-provider retry" rule in `search-server.ts`, so decide it deliberately. If
+done, fall back only on the credit error, not on every HTTP failure.
 
 ### 2. Code changes need a Claude Code restart
 
@@ -92,7 +87,8 @@ Implementation details for R1 to R5 are in
 | R5 | No guidance on which models do agentic work | `--thinking high` default; `pi_models` annotates measured reliability | `9b57f48`, `dbeba27` |
 | R6 | Multiline prompts truncated on Windows | Prompt delivered on stdin, not argv | `63c672a` |
 | R7 | Committed `pi-workspace/.mcp.json` held a machine-specific absolute path | Relative `../src/search-server.ts`, resolved against pi's pinned cwd; test forbids absolute paths | `42e41e2` |
-| R8 | Two tests failed when `.env` set `PI_MCP_PROVIDER=openai-codex` (Bun auto-loads `.env`; `PROVIDER` resolves at module load) | `buildPiArgs` takes the provider as a parameter; unit test asserts it explicitly; integration test picks a model that exists on the active provider | this change |
+| R8 | Two tests failed when `.env` set `PI_MCP_PROVIDER=openai-codex` (Bun auto-loads `.env`; `PROVIDER` resolves at module load) | `buildPiArgs` takes the provider as a parameter; unit test asserts it explicitly; integration test picks a model that exists on the active provider | `74681e7` |
+| R9 | Search errors were a bare `Serper returned HTTP 400.`; the cause (`Not enough credits`) took a manual probe to find | Tool result carries the provider's `message` / `error`, key redacted, capped at 300 chars | this change |
 
 ### Lessons worth keeping
 
