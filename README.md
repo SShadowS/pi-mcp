@@ -73,8 +73,10 @@ costs a few hundred.
 2. Register with Claude Code:
 
    ```bash
-   claude mcp add pi -s user -- bun run <path-to>/pi-mcp/src/pi-server.ts
+   claude mcp add pi -s user -- bun --no-env-file run <path-to>/pi-mcp/src/pi-server.ts
    ```
+
+   Keep `--no-env-file`. Claude Code starts the server in your project directory, and without the flag Bun loads that project's `.env` into the server. pi then inherits those keys.
 
 3. Set a search API key (see Configuration). Restart your terminal so child processes inherit it.
 
@@ -110,7 +112,7 @@ Keys are read from the environment, or from a gitignored `.env` at the repo root
 Choose the provider per registration:
 
 ```bash
-claude mcp add pi -s user -e PI_MCP_PROVIDER=openai-codex -- bun run <path-to>/pi-mcp/src/pi-server.ts
+claude mcp add pi -s user -e PI_MCP_PROVIDER=openai-codex -- bun --no-env-file run <path-to>/pi-mcp/src/pi-server.ts
 ```
 
 Model ids differ per provider, so call `pi_models` after switching. `openai-codex` models have a 272K context, smaller than Copilot's.
@@ -175,7 +177,7 @@ not mitigated**. Point this at code you would be relaxed about open-sourcing.
 | Edge | Detail |
 |------|--------|
 | Code changes need a reconnect | Claude Code spawns the server once and does not respawn it. After edits to `src/`, every tool result starts with a warning until you run `/mcp reconnect pi` or restart Claude Code. |
-| `pi --list-models` depends on cwd | Some directories list ~350 models, others 17 github-copilot rows. `pi_models` filters to the active provider regardless. |
+| Project `.env` leaks into pi | Without `--no-env-file`, Bun loads the `.env` of whatever project Claude Code runs in, and pi inherits it. Symptom: `pi_models(all=true)` shows extra providers (anthropic, openai, openrouter) in some projects. Register with `bun --no-env-file run`. |
 | Wedged call | Use `pi_cleanup`, never `taskkill //F //IM python.exe`. The blunt version kills every other Python MCP server too. |
 
 ## Tests

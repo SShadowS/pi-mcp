@@ -11,15 +11,7 @@ kept at the bottom as a short record of what was learned.
 
 ## Open
 
-### 1. `pi --list-models` is cwd-dependent, cause unknown
-
-**LOW. Documented in README "Sharp edges".**
-
-From one directory pi lists ~350 rows across 5 providers; from another, 17
-github-copilot rows. `pi_models` filters to the active provider, so callers are
-protected, but unexplained inconsistencies tend to matter later.
-
-### 2. Pay-per-token providers are unreachable
+### 1. Pay-per-token providers are unreachable
 
 **LOW. Deliberate. Revisit consciously, not by accident.**
 
@@ -30,7 +22,7 @@ diversity, the whole reason this tool exists, openrouter would widen the spread
 well beyond GPT and Gemini. It is a billing decision, so it stays out of the
 tool until someone makes it.
 
-### 3. Delegate-side context budgeting
+### 2. Delegate-side context budgeting
 
 **DEFERRED. Revisit only if delegates start blowing their context windows.**
 
@@ -41,7 +33,7 @@ own `--session-id` files, pi does its own context management, so there is no
 observed pain yet. `openai-codex` models have a smaller window (272K), which
 makes this more likely to matter there first.
 
-### 4. Reuse one pair of MCP servers across calls
+### 3. Reuse one pair of MCP servers across calls
 
 **DEFERRED. The leak is fixed; this would be the performance fix.**
 
@@ -69,7 +61,8 @@ Implementation details for R1 to R5 are in
 | R8 | Two tests failed when `.env` set `PI_MCP_PROVIDER=openai-codex` (Bun auto-loads `.env`; `PROVIDER` resolves at module load) | `buildPiArgs` takes the provider as a parameter; unit test asserts it explicitly; integration test picks a model that exists on the active provider | `74681e7` |
 | R9 | Search errors were a bare `Serper returned HTTP 400.`; the cause (`Not enough credits`) took a manual probe to find | Tool result carries the provider's `message` / `error`, key redacted, capped at 300 chars | `fb5c644` |
 | R10 | Serper out of credits took search down even with a working SerpAPI key | `runSearch` tries each keyed provider in order; a fallback is announced in the result with the failed provider's error, never silent | `ab3ec78` |
-| R11 | Edits to `src/` did nothing to the running server, with no hint (cost real time on the `--no-skills` and `--thinking high` fixes) | Every tool result is prefixed with a warning naming the changed files until `/mcp reconnect pi`. Exit-on-change was rejected: Claude Code does not respawn stdio servers, so it would break the tool | this change |
+| R11 | Edits to `src/` did nothing to the running server, with no hint (cost real time on the `--no-skills` and `--thinking high` fixes) | Every tool result is prefixed with a warning naming the changed files until `/mcp reconnect pi`. Exit-on-change was rejected: Claude Code does not respawn stdio servers, so it would break the tool | `f674357` |
+| R12 | `pi --list-models` looked cwd-dependent (~350 rows in one place, 17 Copilot rows in another) | Not the cwd. Bun auto-loads `.env` from its start directory, Claude Code starts the server in the project directory, and pi inherits that project's provider keys (al-perf's `.env` added anthropic, openai, azure-openai-responses, openrouter). Registration now uses `bun --no-env-file run` | this change |
 
 ### Lessons worth keeping
 
@@ -79,5 +72,7 @@ Implementation details for R1 to R5 are in
   Python MCP server too (it took out `pal` and `serena`).
 - **pi's `--tools` allowlist fails open.** Unknown names are ignored, so only the
   live probe in `test/leash.test.ts` proves the boundary.
+- **Any Bun process loads the `.env` of the directory it starts in.** A server
+  that Claude Code starts in a project directory gets that project's secrets.
 - **A prior-derived answer looks exactly like a real one.** Make the failure
   visible in the data, not in a human's judgment.
